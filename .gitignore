@@ -1,62 +1,27 @@
-# -----------------------
-# OS / Editor Artifacts
-# -----------------------
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-# -----------------------
-# Python Bytecode & Cache
-# -----------------------
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.pyc
-
-# -----------------------
-# Virtual Environments
-# -----------------------
 venv/
 .venv/
 ENV/
 env/
-
-# -----------------------
-# Jupyter / Notebook
-# -----------------------
 .ipynb_checkpoints/
-
-# -----------------------
-# Logs / Coverage
-# -----------------------
 *.log
 *.out
 coverage/
 htmlcov/
-
-# -----------------------
-# Environment / Secrets
-# -----------------------
 .env
 *.env
 .env.*
-
-# -----------------------
-# Build / Distribution
-# -----------------------
 build/
 dist/
 *.egg-info/
 .eggs/
-
-# -----------------------
-# Docker
-# -----------------------
 *.dockerfile
-
-# -----------------------
-# Misc
-# -----------------------
 *.sqlite3
