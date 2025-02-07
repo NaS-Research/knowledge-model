@@ -17,5 +17,6 @@ class Article(Base):
     authors = Column(String(500))
     journal = Column(String(300))
     pubdate = Column(String(50))
-    abstract = Column(Text) 
+    abstract = Column(Text)
     content = Column(Text)
+    pdf_s3_url = Column(String(500)) 
