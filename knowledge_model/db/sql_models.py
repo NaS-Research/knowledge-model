@@ -1,6 +1,5 @@
 """
 sql_models.py
--------------
 Defines SQLAlchemy models for storing article metadata.
 """
 
@@ -10,9 +9,6 @@ from sqlalchemy import Column, Integer, String, Text
 Base = declarative_base()
 
 class Article(Base):
-    """
-    Represents an article with basic metadata and content.
-    """
     __tablename__ = "articles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -21,4 +17,5 @@ class Article(Base):
     authors = Column(String(500))
     journal = Column(String(300))
     pubdate = Column(String(50))
+    abstract = Column(Text) 
     content = Column(Text)
