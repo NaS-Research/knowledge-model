@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+PyMuPDF
+transformers
+sentence-transformers
+sqlalchemy
+python-dotenv
+pytest
+torch
