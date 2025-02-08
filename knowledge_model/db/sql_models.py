@@ -29,3 +29,10 @@ class ArticleChunk(Base):
     chunk_text = Column(Text, nullable=False)
 
     article = relationship("Article", back_populates="chunks")
+
+class ArticleChunkEmbedding(Base):
+    __tablename__ = "article_chunk_embeddings"
+
+    id = Column(Integer, primary_key=True)
+    chunk_id = Column(Integer, ForeignKey("article_chunks.id"), unique=True)
+    embedding = Column(LargeBinary)
