@@ -1,10 +1,5 @@
-"""
-sql_models.py
-Defines SQLAlchemy models for storing article metadata.
-"""
-
-from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
 
 Base = declarative_base()
 
@@ -19,4 +14,18 @@ class Article(Base):
     pubdate = Column(String(50))
     abstract = Column(Text)
     content = Column(Text)
-    pdf_s3_url = Column(String(500)) 
+    pdf_s3_url = Column(String(500))
+    doi = Column(String(128), nullable=True)
+    pdf_downloaded = Column(Boolean, default=False)  # <--- NEW
+
+    chunks = relationship("ArticleChunk", back_populates="article", cascade="all, delete-orphan")
+
+class ArticleChunk(Base):
+    __tablename__ = "article_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    chunk_text = Column(Text, nullable=False)
+
+    article = relationship("Article", back_populates="chunks")
