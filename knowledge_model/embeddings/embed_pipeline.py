@@ -24,16 +24,20 @@ def run_embedding_pipeline(batch_size=100):
     3. Generate embeddings & store them in DB or a vector store
     :param batch_size: Number of chunks processed per batch
     """
-    logger.info("Initializing DeepSeek-VL2 embedder...")
+    logger.info("Initializing DeepSeek embedder (1.3b chat)...")
     embedder = DeepSeekVL2Embedder(
-        model_path="deepseek-ai/deepseek-vl2-small",  # or local path
-        dtype=None,        # defaults to bfloat16 if available
-        device=None        # auto-detect 'cuda' if available
+        model_path="deepseek-ai/deepseek-vl2-tiny", 
+        dtype=None,    # or torch.float16
+        device=None
     )
+
+    logger.info("Testing a short embed (or generation) ...")
+    test_text = "Hello from the new DeepSeek 1.3b chat model!"
+    embedding = embedder.embed_text(test_text)
+    logger.info(f"Embedding shape: {embedding.shape}")
 
     db = SessionLocal()
     try:
-        # For demonstration, fetch all chunks:
         chunks = db.query(ArticleChunk).all()
         total = len(chunks)
         logger.info("Found %d chunks to embed", total)

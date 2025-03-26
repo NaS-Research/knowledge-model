@@ -8,12 +8,12 @@ import torch
 import numpy as np
 
 from deepseek_vl2.serve.inference import load_model
-# ^ This is from your posted 'inference.py' (which loads the processor, tokenizer, model)
+# ^ This is from 'inference.py' (which loads the processor, tokenizer, model)
 
 class DeepSeekVL2Embedder:
     def __init__(
         self,
-        model_path: str = "deepseek-ai/deepseek-vl2-small",
+        model_path: str = "deepseek-ai/deepseek-vl2-tiny",
         dtype=torch.bfloat16,
         device: str = None,
     ):
@@ -33,7 +33,7 @@ class DeepSeekVL2Embedder:
         """
         Generate an embedding for text alone, ignoring images.
         :param text: input text
-        :param max_new_tokens: 0 => no generation, just hidden states
+        :param max_new_tokens: 0 => no generation, just hidden states (not used in forward pass)
         :param pooling: 'mean' or 'last_token'
         :return: 1D NumPy array (embedding)
         """
@@ -43,6 +43,7 @@ class DeepSeekVL2Embedder:
             {"role": "<|Assistant|>", "content": ""}
         ]
 
+        # Prepare inputs (tokenization + some internal logic from the processor)
         inputs = self.processor(
             conversations=conversation,
             images=[],
@@ -51,24 +52,23 @@ class DeepSeekVL2Embedder:
             system_prompt=""
         ).to(self.device, dtype=self.model.dtype)
 
-        outputs = self.model.language_model(
+        # Directly call self.model(...) without 'max_new_tokens'
+        outputs = self.model(
             inputs_embeds=self.model.prepare_inputs_embeds(**inputs),
             attention_mask=inputs.attention_mask,
             output_hidden_states=True,
-            max_new_tokens=max_new_tokens,
             use_cache=False,
         )
 
-        final_hidden = outputs.hidden_states[-1]  # [batch_size, seq_len, hidden_dim]
-        # We'll assume 1 conversation => final_hidden[0]
-        hidden_seq = final_hidden[0]  # shape: [seq_len, hidden_dim]
+        # outputs.hidden_states[-1]: shape [batch_size, seq_len, hidden_dim]
+        final_hidden = outputs.hidden_states[-1]
+        hidden_seq = final_hidden[0]  # first batch
 
         if pooling == "mean":
             embedding = hidden_seq.mean(dim=0)
         elif pooling == "last_token":
             embedding = hidden_seq[-1, :]
         else:
-            # default fallback to mean
             embedding = hidden_seq.mean(dim=0)
 
         return embedding.cpu().float().numpy()
@@ -85,7 +85,7 @@ class DeepSeekVL2Embedder:
         Embed text + images together. The model merges text and image tokens in the final hidden states.
         :param text: user text
         :param image_paths: local file paths to images
-        :param max_new_tokens: 0 => no generation, just hidden states
+        :param max_new_tokens: 0 => no generation, just hidden states (not used in forward pass)
         :param pooling: 'mean' or 'last_token'
         :return: 1D NumPy array
         """
@@ -106,15 +106,15 @@ class DeepSeekVL2Embedder:
             system_prompt=""
         ).to(self.device, dtype=self.model.dtype)
 
-        outputs = self.model.language_model(
+        # Same fix: omit 'max_new_tokens' in self.model(...)
+        outputs = self.model(
             inputs_embeds=self.model.prepare_inputs_embeds(**inputs),
             attention_mask=inputs.attention_mask,
             output_hidden_states=True,
-            max_new_tokens=max_new_tokens,
             use_cache=False
         )
 
-        final_hidden = outputs.hidden_states[-1]  # [batch_size, seq_len, hidden_dim]
+        final_hidden = outputs.hidden_states[-1]  # shape [batch_size, seq_len, hidden_dim]
         hidden_seq = final_hidden[0]
 
         if pooling == "mean":
@@ -130,9 +130,6 @@ def main():
     embedder = DeepSeekVL2Embedder()
     emb = embedder.embed_text("Hello world!")
     print("Embedding shape:", emb.shape)
-    # Example for images:
-    # emb2 = embedder.embed_multimodal("Cat image", ["./cat.jpg"])
-    # print("Multimodal embedding:", emb2.shape)
 
 if __name__ == "__main__":
     main()
