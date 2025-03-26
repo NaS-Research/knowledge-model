@@ -1,5 +1,6 @@
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, LargeBinary
+
 
 Base = declarative_base()
 
@@ -35,4 +36,5 @@ class ArticleChunkEmbedding(Base):
 
     id = Column(Integer, primary_key=True)
     chunk_id = Column(Integer, ForeignKey("article_chunks.id"), unique=True)
-    embedding = Column(LargeBinary)
+    embedding = Column(LargeBinary)  # or Text if you want to store as JSON or pickled data
+    # e.g. a np.float32 array turned into bytes
