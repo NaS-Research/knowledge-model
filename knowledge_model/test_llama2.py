@@ -3,7 +3,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def main():
-    model_id = "meta-llama/Llama-2-7b-chat-hf"  # or "meta-llama/Llama-2-7b-hf"
+    model_id = "meta-llama/Llama-3.1-8B"
     
     # 1) Load tokenizer (use_auth_token=True to access gated models)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -31,7 +31,7 @@ def main():
 
     # 5) Decode and print
     result = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-    print("Llama 2 says:", result)
+    print("NaS says:", result)
 
 if __name__ == "__main__":
     main()
