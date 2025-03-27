@@ -1,35 +1,38 @@
 """
 upload_s3.py
-Handles uploading PDFs to an S3 bucket using credentials from environment variables.
+------------
+Provides functions to upload files to AWS S3.
 """
 
 import os
 import boto3
-import logging
 
-logger = logging.getLogger(__name__)
+# You can set these via environment variables, or change them directly
+S3_PDF_BUCKET = os.getenv("S3_PDF_BUCKET", "nas-knowledge-model-pdfs")
+S3_DATASET_BUCKET = os.getenv("S3_DATASET_BUCKET", "nas-knowledge-model-dataset")
 
-def upload_pdf_to_s3(local_pdf_path: str) -> str:
+s3_client = boto3.client("s3")
+
+def upload_pdf_to_s3(file_path: str) -> str:
     """
-    Uploads a local PDF to S3 and returns the s3:// URL (or https:// style if you prefer).
-    Requires environment variables:
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_DEFAULT_REGION
-      - S3_BUCKET_NAME
+    Upload a PDF file to the S3 bucket for PDFs.
+    
+    :param file_path: Local file path to the PDF.
+    :return: The S3 URL of the uploaded file.
     """
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
-    )
+    filename = os.path.basename(file_path)
+    s3_key = filename  # You can add a prefix if needed
+    s3_client.upload_file(file_path, S3_PDF_BUCKET, s3_key)
+    return f"https://{S3_PDF_BUCKET}.s3.amazonaws.com/{s3_key}"
 
-    bucket = os.getenv("S3_BUCKET_NAME", "default-bucket")
-    key = os.path.basename(local_pdf_path)  
-    logger.info("Uploading %s to s3://%s/%s", local_pdf_path, bucket, key)
-
-    s3.upload_file(local_pdf_path, bucket, key)
-
-    s3_url = f"s3://{bucket}/{key}"
-    return s3_url
+def upload_dataset_to_s3(file_path: str) -> str:
+    """
+    Upload a dataset file (e.g. JSONL) to the S3 bucket for processed data.
+    
+    :param file_path: Local file path to the dataset.
+    :return: The S3 URL of the uploaded file.
+    """
+    filename = os.path.basename(file_path)
+    s3_key = filename  # You can add a prefix if desired
+    s3_client.upload_file(file_path, S3_DATASET_BUCKET, s3_key)
+    return f"https://{S3_DATASET_BUCKET}.s3.amazonaws.com/{s3_key}"
