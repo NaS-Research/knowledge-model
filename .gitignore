@@ -26,3 +26,5 @@ dist/
 .eggs/
 *.dockerfile
 *.sqlite3
+# Ignore local Python virtual environment
+fresh_env_310/
