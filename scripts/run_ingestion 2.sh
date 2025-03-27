@@ -1,0 +1,1 @@
+python -m knowledge_model.ingestion.pipeline
