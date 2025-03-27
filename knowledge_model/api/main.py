@@ -1,8 +1,3 @@
-"""
-main.py
-Minimal FastAPI app so our Render service has a running server.
-"""
-
 from fastapi import FastAPI
 
 app = FastAPI()

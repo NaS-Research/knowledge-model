@@ -35,7 +35,7 @@ def main():
         python -m knowledge_model.ingestion.parse_pdfs
     """
     logging.basicConfig(level=logging.INFO)
-    pdf_path = "path/to/pdf_document.pdf"  # Replace with your actual PDF path
+    pdf_path = "path/to/pdf_document.pdf" # test
     parsed_data = parse_pdf(pdf_path)
     logger.info(
         "Extracted %d characters from %s",
