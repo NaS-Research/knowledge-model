@@ -24,7 +24,6 @@ class DeepSeekVL2Embedder:
         """
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
 
-        # load_model is from inference.py. It returns (tokenizer, model, processor)
         self.tokenizer, self.model, self.processor = load_model(model_path, dtype=dtype)
         self.model.eval().to(self.device)
 
