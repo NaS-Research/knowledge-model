@@ -26,7 +26,6 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
-    # 2. Now that .env is loaded, os.getenv("DATABASE_URL") will read from it.
     db_url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
     config.set_main_option("sqlalchemy.url", db_url)
     connectable = engine_from_config(

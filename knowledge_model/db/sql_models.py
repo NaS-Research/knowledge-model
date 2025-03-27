@@ -17,7 +17,7 @@ class Article(Base):
     content = Column(Text)
     pdf_s3_url = Column(String(500))
     doi = Column(String(128), nullable=True)
-    pdf_downloaded = Column(Boolean, default=False)  # <--- NEW
+    pdf_downloaded = Column(Boolean, default=False)
 
     chunks = relationship("ArticleChunk", back_populates="article", cascade="all, delete-orphan")
 
@@ -36,5 +36,4 @@ class ArticleChunkEmbedding(Base):
 
     id = Column(Integer, primary_key=True)
     chunk_id = Column(Integer, ForeignKey("article_chunks.id"), unique=True)
-    embedding = Column(LargeBinary)  # or Text if you want to store as JSON or pickled data
-    # e.g. a np.float32 array turned into bytes
+    embedding = Column(LargeBinary)  

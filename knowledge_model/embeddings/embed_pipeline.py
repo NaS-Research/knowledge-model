@@ -6,14 +6,12 @@ and stores them in the database or a vector store.
 
 import logging
 import numpy as np
-import pickle  # or struct/base64, etc., if you store embeddings in DB
+import pickle 
 from sqlalchemy.orm import Session
 
 from knowledge_model.embeddings.embedder_vl2 import DeepSeekVL2Embedder
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import ArticleChunk
-# If storing embeddings in DB, you might also import:
-# from knowledge_model.db.sql_models import ArticleChunkEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +43,6 @@ def run_embedding_pipeline(batch_size=100):
         for i, chunk in enumerate(chunks, start=1):
             text_content = chunk.chunk_text
 
-            # If you have image paths associated with each chunk, you'd do:
-            # image_paths = chunk.image_paths or []
-            # embedding_vector = embedder.embed_multimodal(text_content, image_paths=image_paths)
 
             embedding_vector = embedder.embed_text(text_content)
             # embedding_vector is a NumPy array (float32 or float16)

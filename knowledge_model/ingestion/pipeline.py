@@ -1,10 +1,3 @@
-"""
-pipeline.py
-Orchestrates ingestion: fetches articles, downloads PDFs, parses/cleans text, uploads to S3,
-stores data in the database (including chunked PDF text in a separate table),
-and exports the cleaned and chunked text into a JSON Lines file.
-"""
-
 import json
 import logging
 import os
@@ -13,7 +6,7 @@ import sys
 from knowledge_model.ingestion.fetch_pubmed import fetch_articles
 from knowledge_model.ingestion.download_pdf import download_pmc_pdf
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
-from knowledge_model.ingestion.upload_s3 import upload_pdf_to_s3  # and optionally: upload_dataset_to_s3
+from knowledge_model.ingestion.upload_s3 import upload_pdf_to_s3
 from knowledge_model.processing.text_cleaner import clean_text, chunk_text
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import Article, ArticleChunk
@@ -35,7 +28,6 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
             pmcid_original = art.get("pmcid")
             doi = art.get("doi")
 
-            # Clean up the pmcid string
             pmcid_clean = None
             if pmcid_original:
                 pmcid_clean = pmcid_original.replace("pmc-id:", "").replace(";", "").strip()
@@ -143,7 +135,6 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
                             f.write(json.dumps(record) + "\n")
         logger.info("Inserted/Updated %d articles", len(articles))
 
-        # Optional: After processing all articles, upload the JSONL dataset to S3.
         from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
         dataset_url = upload_dataset_to_s3(output_file)
         logger.info("Dataset uploaded to: %s", dataset_url)
@@ -162,7 +153,7 @@ def test_open_access(chunk_size=1000):
     try:
         forced_article = {
             "pmid": "TEST-12345",
-            "pmcid": "PMC7327471",  # Known open-access (example at time of writing)
+            "pmcid": "PMC7327471",
             "doi": "10.1016/j.cell.2020.06.023",
             "title": "An example open access article",
             "authors": ["Smith J", "Doe A"],

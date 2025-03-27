@@ -3,7 +3,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def main():
-    model_id = "meta-llama/Llama-3.1-8B"
+    model_id = "meta-llama/Llama-3.1-8B-Instruct"
     
     # 1) Load tokenizer (use_auth_token=True to access gated models)
     tokenizer = AutoTokenizer.from_pretrained(
