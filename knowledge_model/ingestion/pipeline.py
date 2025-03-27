@@ -1,17 +1,19 @@
 """
 pipeline.py
 Orchestrates ingestion: fetches articles, downloads PDFs, parses/cleans text, uploads to S3,
-and stores data in the database (including chunked PDF text in a separate table).
-If an article's PDF wasn't previously downloaded, this pipeline attempts again.
+stores data in the database (including chunked PDF text in a separate table),
+and exports the cleaned and chunked text into a JSON Lines file.
 """
 
+import json
 import logging
 import os
 import sys
+
 from knowledge_model.ingestion.fetch_pubmed import fetch_articles
 from knowledge_model.ingestion.download_pdf import download_pmc_pdf
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
-from knowledge_model.ingestion.upload_s3 import upload_pdf_to_s3
+from knowledge_model.ingestion.upload_s3 import upload_pdf_to_s3  # and optionally: upload_dataset_to_s3
 from knowledge_model.processing.text_cleaner import clean_text, chunk_text
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import Article, ArticleChunk
@@ -22,6 +24,10 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
     logger.info("Fetching articles for '%s'", query)
     articles = fetch_articles(query, max_results)
     db = SessionLocal()
+
+    # Ensure output directory for JSONL dataset exists
+    output_file = "data/science_articles/train.jsonl"
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     try:
         for art in articles:
@@ -94,7 +100,17 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
                             chunk_text=chunk_str
                         )
                         db.add(db_chunk)
+                    db.commit()
 
+                    # Append each chunk to the JSONL dataset file
+                    with open(output_file, "a", encoding="utf-8") as f:
+                        for chunk_str in pdf_chunks:
+                            record = {
+                                "pmid": pmid,
+                                "title": title,
+                                "text": chunk_str
+                            }
+                            f.write(json.dumps(record) + "\n")
             else:
                 logger.info("Found existing article for PMID %s", pmid)
                 existing_article.title = title
@@ -115,10 +131,22 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
                             chunk_text=chunk_str
                         )
                         db.add(db_chunk)
-
-                db.commit()
-
+                    db.commit()
+                    # Append new chunks to the JSONL dataset file
+                    with open(output_file, "a", encoding="utf-8") as f:
+                        for chunk_str in pdf_chunks:
+                            record = {
+                                "pmid": pmid,
+                                "title": title,
+                                "text": chunk_str
+                            }
+                            f.write(json.dumps(record) + "\n")
         logger.info("Inserted/Updated %d articles", len(articles))
+
+        # Optional: After processing all articles, upload the JSONL dataset to S3.
+        from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
+        dataset_url = upload_dataset_to_s3(output_file)
+        logger.info("Dataset uploaded to: %s", dataset_url)
 
     except Exception as e:
         logger.exception("Error during pipeline: %s", e)
@@ -126,16 +154,12 @@ def run_pipeline(query="machine learning in cancer", max_results=5, chunk_size=1
     finally:
         db.close()
 
-
 def test_open_access(chunk_size=1000):
     """
     Force-test a single known open-access PMC article to verify PDF download and S3 upload.
     """
-
     db = SessionLocal()
     try:
-        # This PMC ID is known to be open access (as of time of writing).
-        # Replace with another confirmed open-access ID if needed.
         forced_article = {
             "pmid": "TEST-12345",
             "pmcid": "PMC7327471",  # Known open-access (example at time of writing)
@@ -155,7 +179,6 @@ def test_open_access(chunk_size=1000):
         pdf_chunks = []
         pdf_downloaded = False
 
-        # Try download if no existing article or existing is missing PDF
         if existing_article and existing_article.pdf_downloaded:
             logger.info("Already have PDF for PMID %s; skipping download.", pmid)
         else:
@@ -177,7 +200,6 @@ def test_open_access(chunk_size=1000):
                 pdf_downloaded = False
 
         if not existing_article:
-            # Insert new
             db_article = Article(
                 pmid=pmid,
                 title=forced_article["title"],
@@ -201,13 +223,19 @@ def test_open_access(chunk_size=1000):
                         chunk_text=chunk_str
                     )
                     db.add(db_chunk)
-
+                db.commit()
+                with open("data/science_articles/train.jsonl", "a", encoding="utf-8") as f:
+                    for chunk_str in pdf_chunks:
+                        record = {
+                            "pmid": pmid,
+                            "title": forced_article["title"],
+                            "text": chunk_str
+                        }
+                        f.write(json.dumps(record) + "\n")
         else:
-            # Update existing
             existing_article.pdf_downloaded = existing_article.pdf_downloaded or pdf_downloaded
             existing_article.pdf_s3_url = existing_article.pdf_s3_url or pdf_s3_url
 
-            # if we just downloaded new chunks
             if pdf_downloaded and pdf_chunks:
                 for i, chunk_str in enumerate(pdf_chunks):
                     db_chunk = ArticleChunk(
@@ -216,8 +244,15 @@ def test_open_access(chunk_size=1000):
                         chunk_text=chunk_str
                     )
                     db.add(db_chunk)
-
-        db.commit()
+                db.commit()
+                with open("data/science_articles/train.jsonl", "a", encoding="utf-8") as f:
+                    for chunk_str in pdf_chunks:
+                        record = {
+                            "pmid": pmid,
+                            "title": forced_article["title"],
+                            "text": chunk_str
+                        }
+                        f.write(json.dumps(record) + "\n")
         logger.info("Test open-access ingestion complete.")
     except Exception as e:
         logger.exception("Error during test_open_access: %s", e)
@@ -225,16 +260,12 @@ def test_open_access(chunk_size=1000):
     finally:
         db.close()
 
-
 def main():
     logging.basicConfig(level=logging.INFO)
-
-    # Basic CLI dispatch
     args = sys.argv[1:]
     if len(args) == 1 and args[0].lower() == "test_oa":
         test_open_access()
     else:
-        # Default pipeline
         run_pipeline(query="SARS-CoV-2 open access", max_results=5)
 
 if __name__ == "__main__":
