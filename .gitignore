@@ -1,7 +1,10 @@
-.DS_Store
-Thumbs.db
+# === Editor and IDE ===
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+
+# === Python cache and environments ===
 __pycache__/
 *.py[cod]
 *.pyo
@@ -11,22 +14,39 @@ venv/
 .venv/
 ENV/
 env/
-.env
-.ipynb_checkpoints/
-*.log
-*.out
-coverage/
-htmlcov/
-.env
-*.env
+fresh_env_310/
+
+# === Environment variables ===
 .env.*
+*.env
+
+# === Build artifacts ===
 build/
 dist/
 *.egg-info/
 .eggs/
-*.dockerfile
+
+# === Jupyter/IPython ===
+.ipynb_checkpoints/
+
+# === Logs and coverage ===
+*.log
+*.out
+logs/
+coverage/
+htmlcov/
+.cache/
+
+# === SQLite, Docker, binaries ===
 *.sqlite3
-# Ignore local Python virtual environment
-fresh_env_310/
-/data/*.jsonl
+*.dockerfile
+*.bin
+*.pt
+*.safetensors
+
+# === Project-specific (large artifacts and data) ===
 /data/
+*.jsonl
+adapters/
+training/output/
+training/tiny_out/
