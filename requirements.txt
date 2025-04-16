@@ -8,3 +8,7 @@ sqlalchemy
 python-dotenv
 pytest
 torch
+numpy<2datasets
+peft
+accelerate
+trl
