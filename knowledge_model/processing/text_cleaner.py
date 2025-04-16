@@ -1,80 +1,71 @@
 """
-text_cleaner.py
-Removes bracketed references, figure references, collapses whitespace,
-optionally removes a trailing 'References' section, and splits text into chunks.
+Text cleaner: removes references, normalizes spacing, and splits into word chunks.
 """
 
+import json
 import re
-# Pre‑compiled patterns for speed and to avoid over‑matching
-REF_TAG      = re.compile(r"\[(?:[\w\s,;-]{1,20})\]")               # e.g. [12] or [Smith 2020]
-FIG_TAG      = re.compile(r"\((?:fig(?:ure)?\s?[A-Za-z0-9]+)\)", re.I)  # e.g. (Fig 2A) or (Figure S1)
-REF_SECTION  = re.compile(r"\n(?:references|bibliography)\b", re.I)    # section header
+from pathlib import Path
+from typing import Any
+
+REF_TAG = re.compile(r"\[(?:[\w\s,;-]{1,20})\]")
+FIG_TAG = re.compile(r"\((?:fig(?:ure)?\s?[A-Za-z0-9]+)\)", re.I)
+REF_SECTION = re.compile(r"\n(?:references|bibliography)\b", re.I)
+
 
 def clean_text(text: str) -> str:
     """
-    Removes bracketed references, figure references, a trailing 'References' section,
-    and collapses extra whitespace.
+    Clean scientific text by removing references and excess whitespace.
     """
     text = REF_TAG.sub("", text)
     text = FIG_TAG.sub("", text)
     text = remove_references_section(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
+
 
 def remove_references_section(text: str) -> str:
     """
-    Removes everything from 'References' or 'Bibliography' to the end (case‑insensitive).
+    Truncate text at the start of 'References' or 'Bibliography' section.
     """
-    m = REF_SECTION.search(text)
-    return text[: m.start()] if m else text
+    match = REF_SECTION.search(text)
+    return text[: match.start()] if match else text
+
 
 def chunk_text(text: str, chunk_size: int = 1000) -> list[str]:
     """
-    Splits text into chunks of roughly 'chunk_size' words each.
+    Split text into word-based chunks of specified size.
     """
     words = text.split()
-    chunks, current, count = [], [], 0
+    return [
+        " ".join(words[i:i + chunk_size])
+        for i in range(0, len(words), chunk_size)
+    ]
 
-    for w in words:
-        current.append(w)
-        count += 1
-        if count >= chunk_size:
-            chunks.append(" ".join(current))
-            current.clear()
-            count = 0
 
-    if current:
-        chunks.append(" ".join(current))
-
-    return chunks
-
-def process_jsonl(src_file="data/science_articles/train.jsonl", out_dir="data/clean"):
+def process_jsonl(src_file: str = "data/science_articles/train.jsonl", out_dir: str = "data/clean") -> None:
     """
-    Reads a line‑delimited JSONL file produced by the ingestion pipeline,
-    cleans & chunks each record, and writes one JSON file per chunk into `out_dir`.
-    Output filename pattern: {pmid}_{chunk_index}.json
+    Process a JSONL dataset, clean and chunk text, and save each chunk as JSON.
     """
-    import json, pathlib
-    pathlib.Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
 
-    with open(src_file, "r", encoding="utf-8") as f:
+    with Path(src_file).open("r", encoding="utf-8") as f:
         for line in f:
-            rec = json.loads(line)
-            pmid  = rec.get("pmid", "NA")
+            rec: dict[str, Any] = json.loads(line)
+            pmid = rec.get("pmid", "NA")
             title = rec.get("title", "")
-            cleaned = clean_text(rec.get("text", ""))
-            chunks  = chunk_text(cleaned, 512)     # 512‑word chunks
+            text = clean_text(rec.get("text", ""))
+            chunks = chunk_text(text, 512)
 
-            for i, ch in enumerate(chunks):
-                out_obj = {
+            for i, chunk in enumerate(chunks):
+                out_file = out_path / f"{pmid}_{i}.json"
+                out_data = {
                     "id": f"{pmid}_{i}",
                     "title": title,
-                    "chunks": [ch]
+                    "chunks": [chunk],
                 }
-                out_path = pathlib.Path(out_dir) / f"{pmid}_{i}.json"
-                out_path.write_text(json.dumps(out_obj))
+                out_file.write_text(json.dumps(out_data, ensure_ascii=False))
+
 
 if __name__ == "__main__":
-    # default paths match ingestion pipeline
     process_jsonl()
     print("Cleaned chunks written to data/clean/")

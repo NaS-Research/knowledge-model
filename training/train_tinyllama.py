@@ -1,52 +1,51 @@
 """
-Fine‑tune TinyLlama‑1.1B on your Mac mini (MPS) with LoRA.
+Fine-tune TinyLlama-1.1B on Mac (MPS) using LoRA adapters.
+
 Corpus: data/science_articles/train.jsonl
 """
 
-import torch, os
-from transformers import AutoTokenizer, AutoModelForCausalLM
+import os
+import time
+from typing import Any
+
+import torch
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
-from transformers import TrainingArguments, Trainer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+)
+
+from knowledge_model.ingestion.upload_s3 import upload_directory
 
 MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+ADAPTER_DIR = "adapters/tinyllama-health"
 
-def main():
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Using device: {device}")
-
+def load_tokenizer() -> Any:
     tok = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True)
-    tok.pad_token = tok.eos_token               # silence warning
+    tok.pad_token = tok.eos_token
+    return tok
 
-    # --- load on CPU in fp16, then move to MPS ---
+
+def load_model(device: str) -> torch.nn.Module:
     base = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
-        torch_dtype=torch.float16,   # cast bfloat16 → fp16
-        device_map="cpu",            # load weights on CPU first
+        torch_dtype=torch.float16,
+        device_map="cpu",
         low_cpu_mem_usage=True,
     )
-    base = base.to(device)           # now move to "mps"
+    return base.to(device)
 
-    # ---- PEFT / LoRA config (very small) ----
-    lora_cfg = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q_proj","k_proj","v_proj","o_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(base, lora_cfg)
 
-    # ---- Data ----
-    raw_ds = load_dataset("json", data_files="data/science_articles/train.jsonl")["train"]
-
-    # Drop non‑text metadata columns before tokenization
+def tokenize_dataset(tokenizer, file_path: str) -> Any:
+    raw_ds = load_dataset("json", data_files=file_path)["train"]
     raw_ds = raw_ds.remove_columns([col for col in raw_ds.column_names if col not in {"text"}])
 
-    def tokenize(example):
-        out = tok(
+    def tokenize(example: dict) -> dict:
+        out = tokenizer(
             example["text"],
             truncation=True,
             max_length=512,
@@ -55,9 +54,29 @@ def main():
         out["labels"] = out["input_ids"].copy()
         return out
 
-    ds = raw_ds.map(tokenize, batched=False)
+    return raw_ds.map(tokenize, batched=False)
 
-    # ---- Training args ----
+
+def main() -> None:
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Using device: {device}")
+
+    tokenizer = load_tokenizer()
+    base_model = load_model(device)
+
+    lora_cfg = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(base_model, lora_cfg)
+
+    dataset_path = "data/science_articles/train.jsonl"
+    dataset = tokenize_dataset(tokenizer, dataset_path)
+
     args = TrainingArguments(
         output_dir="training/tiny_out",
         num_train_epochs=2,
@@ -74,15 +93,27 @@ def main():
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=ds,
+        train_dataset=dataset,
     )
-    trainer.train()
 
-    # ---- Save adapters ----
-    adapter_dir = "adapters/tinyllama-health"
-    model.save_pretrained(adapter_dir)
-    tok.save_pretrained(adapter_dir)
-    print(f"Adapters saved to {adapter_dir}")
+    start = time.time()
+    print(f"Training started on {len(dataset)} chunks...")
+    trainer.train()
+    mins, secs = divmod(int(time.time() - start), 60)
+    print(f"Training finished in {mins} min {secs} sec")
+
+    model.save_pretrained(ADAPTER_DIR)
+    tokenizer.save_pretrained(ADAPTER_DIR)
+    print(f"Adapters saved to {ADAPTER_DIR}")
+
+    upload_directory(
+        ADAPTER_DIR,
+        bucket="nas-knowledge-model-dataset",
+        prefix=f"adapters/{os.path.basename(ADAPTER_DIR)}"
+    )
+    print("Adapter uploaded to S3")
+    print(f"Training complete on {len(dataset)} article chunks.")
+
 
 if __name__ == "__main__":
     main()

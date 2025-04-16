@@ -1,26 +1,33 @@
 """
-download_pdf.py
-Downloads an open-access PDF from PubMed Central if a PMCID is available.
+Downloads an open-access PDF from PubMed Central given a PMCID.
 """
 
-import os
-import requests
 import logging
+import os
+from pathlib import Path
+
+import requests
 
 logger = logging.getLogger(__name__)
 
+
 def download_pmc_pdf(pmcid: str, download_dir: str = "/tmp") -> str:
     """
-    Attempt to download the PDF from PMC for an open-access article.
-    Returns the local file path or raises an exception on failure.
+    Download a PDF from PMC for an open-access article.
+
+    Args:
+        pmcid: The PMC identifier (e.g. "PMC123456").
+        download_dir: The local directory to save the PDF.
+
+    Returns:
+        The local file path of the downloaded PDF.
+
+    Raises:
+        ValueError: If the PDF cannot be downloaded successfully.
     """
+    url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf"
+    path = Path(download_dir) / f"{pmcid}.pdf"
 
-    pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf"
-    local_path = os.path.join(download_dir, f"{pmcid}.pdf")
-
-    logger.info("Downloading PDF from %s", pdf_url)
-
-    # Add a User-Agent header to avoid potential bot blocking.
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -29,12 +36,13 @@ def download_pmc_pdf(pmcid: str, download_dir: str = "/tmp") -> str:
         )
     }
 
-    resp = requests.get(pdf_url, headers=headers)
-    if resp.status_code == 200 and "application/pdf" in resp.headers.get("Content-Type", ""):
-        with open(local_path, "wb") as f:
-            f.write(resp.content)
-        return local_path
-    else:
-        msg = f"Failed to download PDF for {pmcid} (status {resp.status_code})."
-        logger.warning(msg)
-        raise ValueError(msg)
+    logger.info("Downloading PDF from %s", url)
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200 and "application/pdf" in response.headers.get("Content-Type", ""):
+        path.write_bytes(response.content)
+        return str(path)
+
+    msg = f"Failed to download PDF for {pmcid} (status {response.status_code})."
+    logger.warning(msg)
+    raise ValueError(msg)
