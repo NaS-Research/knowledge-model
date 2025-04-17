@@ -6,7 +6,9 @@ Corpus: data/science_articles/NaS.jsonl
 
 import os
 import time
+import math
 from typing import Any
+from transformers import TrainerCallback
 
 import torch
 from datasets import load_dataset
@@ -22,6 +24,23 @@ from knowledge_model.ingestion.upload_s3 import upload_directory
 
 MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 ADAPTER_DIR = "adapters/tinyllama-health"
+
+
+class TimerCallback(TrainerCallback):
+    """Prints an ETA every `logging_steps`."""
+    def __init__(self, total_steps: int):
+        self.total_steps = total_steps
+        self.start_time = time.time()
+
+    def on_log(self, args, state, control, **kwargs):
+        if state.global_step == 0:
+            return
+        elapsed = time.time() - self.start_time
+        steps_left = self.total_steps - state.global_step
+        eta_seconds = elapsed / state.global_step * steps_left
+        mins, secs = divmod(int(eta_seconds), 60)
+        print(f"→ {state.global_step}/{self.total_steps} steps "
+              f"(ETA ~ {mins} m {secs} s)")
 
 
 def load_tokenizer() -> Any:
@@ -88,12 +107,17 @@ def main() -> None:
         gradient_checkpointing=False,
         report_to="none",
         remove_unused_columns=False,
+        disable_tqdm=False,
     )
+
+    effective_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    total_steps = math.ceil(len(dataset) / effective_batch_size) * args.num_train_epochs
 
     trainer = Trainer(
         model=model,
         args=args,
         train_dataset=dataset,
+        callbacks=[TimerCallback(total_steps)]
     )
 
     start = time.time()

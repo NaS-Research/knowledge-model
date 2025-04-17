@@ -15,6 +15,43 @@ from pathlib import Path
 from typing import Optional, Union
 
 import boto3
+import threading
+try:
+    from tqdm.auto import tqdm  # progress bar
+except ImportError:  # fallback if tqdm isn't installed
+    tqdm = None
+
+class _TqdmCallback:
+    """
+    Streaming callback for boto3 that renders a progress bar with tqdm.
+ 
+    It is created once per file upload and fed the byte‐count chunks that
+    boto3 transfers.
+    """
+    def __init__(self, filename: Path):
+        self._filename = filename
+        self._size = filename.stat().st_size
+        self._seen = 0
+        self._lock = threading.Lock()
+        self._bar = (
+            tqdm(total=self._size, unit="B", unit_scale=True,
+                 unit_divisor=1024, desc=filename.name, leave=False)
+            if tqdm is not None else None
+        )
+ 
+    def __call__(self, bytes_amount: int) -> None:
+        with self._lock:
+            self._seen += bytes_amount
+            if self._bar:
+                self._bar.update(bytes_amount)
+            # fall‑back: basic percentage if tqdm is missing
+            elif self._size:
+                pct = (self._seen / self._size) * 100
+                print(f"\rUploading {self._filename.name}: {pct:5.1f}% ", end="", flush=True)
+ 
+    def close(self) -> None:
+        if self._bar:
+            self._bar.close()
 
 S3_PDF_BUCKET = os.getenv("S3_PDF_BUCKET", "nas-knowledge-model-pdfs")
 S3_DATASET_BUCKET = os.getenv("S3_DATASET_BUCKET", "nas-knowledge-model-dataset")
@@ -30,7 +67,15 @@ def _upload_file(
 ) -> str:
     """Upload a single local file and return its HTTPS S3 URL."""
     path = Path(file_path)
-    s3_client.upload_file(str(path), bucket, key, ExtraArgs=extra_args or {})
+    cb = _TqdmCallback(path)
+    s3_client.upload_file(
+        str(path),
+        bucket,
+        key,
+        ExtraArgs=extra_args or {},
+        Callback=cb,
+    )
+    cb.close()
     return f"https://{bucket}.s3.amazonaws.com/{key}"
 
 

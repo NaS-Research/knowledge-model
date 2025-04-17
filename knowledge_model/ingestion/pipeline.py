@@ -89,7 +89,7 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             tqdm(articles, desc="Processing", unit="article", **tqdm_kwargs), start=1
         ):
             pmid = art["pmid"]
-            pmcid = (art.get("pmcid") or "").replace("pmc-id:", "").strip()
+            pmcid = (art.get("pmcid") or "").replace("pmc-id:", "").split(";")[0].strip()
             doi = art.get("doi")
             pubdate = clean_text(art.get("pubdate") or "") or None
 
