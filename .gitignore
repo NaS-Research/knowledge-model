@@ -1,0 +1,54 @@
+# === Editor and IDE ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === Python cache and environments ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+venv/
+.venv/
+ENV/
+env/
+fresh_env_310/
+
+# === Environment variables ===
+.env.*
+*.env
+
+# === Build artifacts ===
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# === Jupyter/IPython ===
+.ipynb_checkpoints/
+
+# === Logs and coverage ===
+*.log
+*.out
+logs/
+coverage/
+htmlcov/
+.cache/
+
+# === SQLite, Docker, binaries ===
+*.sqlite3
+*.dockerfile
+*.bin
+*.pt
+*.safetensors
+
+# === Project-specific (large artifacts and data) ===
+/data/
+*.jsonl
+adapters/
+training/output/
+training/tiny_out/
+knowledge_model.db
+knowledge_model.db
