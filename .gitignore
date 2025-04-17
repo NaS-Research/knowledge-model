@@ -50,3 +50,4 @@ htmlcov/
 adapters/
 training/output/
 training/tiny_out/
+knowledge_model.db # prevent future adds
