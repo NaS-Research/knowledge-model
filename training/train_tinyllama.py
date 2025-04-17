@@ -1,7 +1,7 @@
 """
 Fine-tune TinyLlama-1.1B on Mac (MPS) using LoRA adapters.
 
-Corpus: data/science_articles/train.jsonl
+Corpus: data/science_articles/NaS.jsonl
 """
 
 import os
@@ -74,7 +74,7 @@ def main() -> None:
     )
     model = get_peft_model(base_model, lora_cfg)
 
-    dataset_path = "data/science_articles/train.jsonl"
+    dataset_path = "data/science_articles/NaS.jsonl"
     dataset = tokenize_dataset(tokenizer, dataset_path)
 
     args = TrainingArguments(
@@ -102,6 +102,10 @@ def main() -> None:
     mins, secs = divmod(int(time.time() - start), 60)
     print(f"Training finished in {mins} min {secs} sec")
 
+    if os.path.exists(ADAPTER_DIR):
+        import shutil
+        shutil.rmtree(ADAPTER_DIR)
+
     model.save_pretrained(ADAPTER_DIR)
     tokenizer.save_pretrained(ADAPTER_DIR)
     print(f"Adapters saved to {ADAPTER_DIR}")
@@ -112,7 +116,7 @@ def main() -> None:
         prefix=f"adapters/{os.path.basename(ADAPTER_DIR)}"
     )
     print("Adapter uploaded to S3")
-    print(f"Training complete on {len(dataset)} article chunks.")
+    print(f"Training complete on {len(dataset)} article chunks for NaS.")
 
 
 if __name__ == "__main__":
