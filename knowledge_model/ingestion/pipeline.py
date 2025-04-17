@@ -5,6 +5,7 @@ Ingestion pipeline to fetch articles, download PDFs, extract content, and store 
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,17 +25,22 @@ logger = logging.getLogger(__name__)
 def run_pipeline(query: str, max_results: int = 5, chunk_size: int = 1000) -> None:
     logger.info("Fetching articles for '%s'", query)
     articles = fetch_articles(query, max_results)
+    logger.info("Fetched %d articles from PubMed.", len(articles))
     db = SessionLocal()
 
-    now = datetime.utcnow()
-    batch_label = f"{now.year}-{now.month:02d}"
+    match = re.search(r'"(\d{4})/(\d{2})/01"\[PDAT\]', query)
+    if not match:
+        raise ValueError("Query must contain a start date in the format 'YYYY/MM/01[PDAT]'")
+    year, month = match.group(1), match.group(2)
+    batch_label = f"{year}-{month}"
     output_file = Path(f"data/science_articles/{batch_label}.jsonl")
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         for art in articles:
             pmid = art.get("pmid")
-            pmcid = art.get("pmcid", "").replace("pmc-id:", "").replace(";", "").strip()
+            pmcid_raw = art.get("pmcid")
+            pmcid = (pmcid_raw or "").replace("pmc-id:", "").replace(";", "").strip()
             doi = art.get("doi")
             pubdate = clean_text(art.get("pubdate") or "") or None
 
@@ -58,8 +64,11 @@ def run_pipeline(query: str, max_results: int = 5, chunk_size: int = 1000) -> No
                     pdf_s3_url = upload_dataset_to_s3(path)
                     os.remove(path)
                     pdf_downloaded = True
+                    logger.info("Parsed and chunked PDF for PMCID %s (%d chunks)", pmcid, len(pdf_chunks))
                 except Exception as e:
                     logger.warning("PDF failed for %s (%s): %s", pmid, pmcid, e)
+            else:
+                logger.warning("No PMCID available or already downloaded for article %s", pmid)
 
             article = existing or Article(
                 pmid=pmid,
@@ -75,20 +84,22 @@ def run_pipeline(query: str, max_results: int = 5, chunk_size: int = 1000) -> No
             )
             db.add(article)
             db.commit()
+            logger.info("Inserted new article %s into database.", pmid)
 
             if pdf_downloaded and pdf_chunks:
                 for i, chunk in enumerate(pdf_chunks):
                     db_chunk = ArticleChunk(article_id=article.id, chunk_index=i, chunk_text=chunk)
                     db.add(db_chunk)
                 db.commit()
+                logger.info("Inserted %d chunks for article %s", len(pdf_chunks), pmid)
 
-                try:
-                    dt = datetime.strptime(pubdate, "%Y %b %d")
-                except Exception:
-                    dt = datetime.utcnow()
-
-                clean_dir = Path("data/clean") / f"{dt.year:04d}" / f"{dt.month:02d}"
+                clean_dir = Path("data/clean") / year / month
                 clean_dir.mkdir(parents=True, exist_ok=True)
+                base_name = f"{pmid}_{article.id}"
+                existing = any(p.name.startswith(base_name) for p in clean_dir.glob("*.jsonl"))
+                if existing:
+                    logger.info("Skipping duplicate chunk write for %s", base_name)
+                    continue
 
                 with open(output_file, "a", encoding="utf-8") as train_f, \
                      open(clean_dir / f"{pmid}_{article.id}.jsonl", "a", encoding="utf-8") as clean_f:
@@ -98,9 +109,15 @@ def run_pipeline(query: str, max_results: int = 5, chunk_size: int = 1000) -> No
                         train_f.write(line)
                         clean_f.write(line)
 
+                logger.info("Wrote cleaned chunks for %s to %s", pmid, clean_dir)
+
         logger.info("Inserted/Updated %d articles", len(articles))
-        dataset_url = upload_dataset_to_s3(output_file)
-        logger.info("Dataset uploaded to: %s", dataset_url)
+        if output_file.exists():
+            logger.info("Uploading training dataset %s to S3...", output_file.name)
+            dataset_url = upload_dataset_to_s3(output_file)
+            logger.info("Training dataset uploaded to: %s", dataset_url)
+        else:
+            logger.warning("No dataset file created at %s — skipping upload.", output_file)
 
     except Exception as e:
         logger.exception("Error during pipeline: %s", e)
@@ -192,7 +209,7 @@ def main() -> None:
         test_open_access()
     else:
         run_pipeline(
-            query='("2010/01/01"[PDAT] : "2010/01/31"[PDAT])',
+            query='("2023/01/01"[PDAT] : "2023/01/31"[PDAT])',
             max_results=100,
         )
 
