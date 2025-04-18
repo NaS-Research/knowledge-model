@@ -90,4 +90,4 @@ def rag_answer(query: str, k: int = 3) -> dict:
 @app.post("/ask")
 def ask(req: AskRequest) -> dict:
     return rag_answer(req.text, req.k)
-# test
+# testt
