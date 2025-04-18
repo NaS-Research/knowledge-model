@@ -1,4 +1,3 @@
-
 """
 inference.postprocess
 ---------------------
@@ -34,11 +33,20 @@ _SPECIAL_TOKENS: Set[str] = {
     "<|endoftext|>",
     "<|assistant|>",
     "<|user|>",
+    "###",
 }
  
 # Regex to find simple inline citations.  Extend if you adopt a new style.
 _CIT_RE = re.compile(r"(PMID|PMCID|DOI):\s*\S+", flags=re.IGNORECASE)
- 
+
+# Remove everything from the first boiler‑plate header onward
+_SECTION_HEAD_RE = re.compile(
+    r"\b("
+    r"Acknowledg(e)?ments?|Funding|Disclosure|Conflict(s)? of Interest|"
+    r"Author(ship)? Statement|Disclaimer|References|Source"
+    r")\s*:.*",
+    flags=re.IGNORECASE | re.DOTALL,
+)
  
 # --------------------------------------------------------------------------- #
 # return container
@@ -61,11 +69,9 @@ def _strip_special_tokens(raw: str) -> str:
  
  
 def _trim_to_last_period(txt: str) -> str:
-    """If the model stopped mid‑sentence, cut back to the last full stop."""
-    last_full_stop = txt.rfind(".")
-    if last_full_stop > 0:
-        return txt[: last_full_stop + 1]
-    return txt
+    """If generation stopped mid‑sentence, cut back to the last sentence end."""
+    idx = max(txt.rfind("."), txt.rfind("?"), txt.rfind("!"))
+    return txt[: idx + 1] if idx > 0 else txt
  
  
 def _dedup_sentences(txt: str) -> str:
@@ -80,6 +86,14 @@ def _dedup_sentences(txt: str) -> str:
             cleaned.append(sent)
             seen.add(sent)
     return " ".join(cleaned)
+
+def _remove_boilerplate(txt: str) -> str:
+    """
+    Cut any trailing boiler‑plate sections (Acknowledgments, Funding, etc.)
+    that sometimes leak from PubMed‑style training docs.
+    """
+    m = _SECTION_HEAD_RE.search(txt)
+    return txt[: m.start()] if m else txt
  
  
 def _cap_length(txt: str, max_words: int | None) -> str:
@@ -120,6 +134,20 @@ def postprocess(raw_output: str, *, max_words: int | None = 200) -> PostProcessR
     txt = _strip_special_tokens(raw_output)
     txt = _trim_to_last_period(txt)
     txt = _dedup_sentences(txt)
+    txt = _remove_boilerplate(txt)
     txt = _cap_length(txt, max_words=max_words)
  
     return PostProcessResult(text=txt, citations=_extract_citations(txt))
+
+# --------------------------------------------------------------------------- #
+# Back‑compat shim – simple `clean()` alias
+# --------------------------------------------------------------------------- #
+def clean(raw_output: str) -> str:
+    """
+    Lightweight wrapper kept for older callers (e.g. cli_chat) that only
+    need the polished text string.
+
+        >>> from inference.postprocess import clean
+        >>> print(clean("raw <pad> output..."))
+    """
+    return postprocess(raw_output, max_words=None).text

@@ -1,19 +1,3 @@
-
-"""
-inference.cli_chat
-------------------
-
-Tiny, single–file command‑line chat interface for your fine‑tuned
-TinyLlama‑Health model (+ LoRA adapters).
-
-❯ python -m inference.cli_chat                       # interactive REPL
-❯ python -m inference.cli_chat --prompt "Hello"      # one‑shot generation
-
-This script deliberately keeps *only* glue‑code.  Loading the model,
-building prompts and cleaning output live in helper modules so that
-Web/FastAPI/Gradio front‑ends can reuse the same logic.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -23,9 +7,36 @@ from pathlib import Path
 from typing import Optional
 
 from inference import config                       # device + defaults
-from inference.model import load_pipeline          # returns TextGenerationPipeline
-from inference.prompt_utils import build_prompt    # wraps system + user
+from inference.model import load_pipeline, stream as model_stream  # returns TextGenerationPipeline
 from inference.postprocess import clean            # trims loops / sections
+
+# --------------------------------------------------------------------------- #
+# Prompt builder for multi‑turn chat
+# --------------------------------------------------------------------------- #
+def _build_chat_prompt(
+    system_prompt: str,
+    history: list[tuple[str, str]],
+    user_msg: str,
+) -> str:
+    """
+    Compose a TinyLlama‑Chat style conversation prompt that includes the
+    whole history plus the new user message:
+
+        <|system|> ... </s>
+        <|user|>   ... </s>
+        <|assistant|> ... </s>
+        ...
+        <|user|>   NEW </s>
+        <|assistant|>
+
+    TinyLlama‑Chat recognises the role tags, so it will continue the dialogue
+    naturally.
+    """
+    parts: list[str] = [f"<|system|>{system_prompt}</s>"]
+    for role, text in history:
+        parts.append(f"<|{role}|>{text}</s>")
+    parts.append(f"<|user|>{user_msg.strip()}</s><|assistant|>")
+    return "".join(parts)
 
 # --------------------------------------------------------------------------- #
 # CLI helpers
@@ -47,14 +58,32 @@ def _parse_args() -> argparse.Namespace:
         help="Path to LoRA adapter directory",
     )
     parser.add_argument(
-        "--max_new", type=int, default=256, help="Maximum new tokens to generate"
+        "--max_new",
+        type=int,
+        default=256,
+        help="Ceiling for new tokens (auto‑shrinks if it would exceed context window)",
     )
-    parser.add_argument("--temp", type=float, default=0.7, help="Sampling temperature")
-    parser.add_argument("--top_p", type=float, default=0.9, help="Top‑p nucleus value")
+    parser.add_argument("--temp", type=float, default=0.65, help="Sampling temperature")
+    parser.add_argument("--top_p", type=float, default=0.92, help="Top‑p nucleus value")
     parser.add_argument(
         "--stream",
         action="store_true",
         help="Print tokens as they arrive (non‑blocking)",
+    )
+    parser.add_argument("--top_k", type=int, default=0, help="Top‑k filtering")
+    parser.add_argument(
+        "--rep_pen", type=float, default=1.05, help="Repetition penalty"
+    )
+    parser.add_argument(
+        "--no_repeat", type=int, default=3, help="No‑repeat n‑gram size"
+    )
+    
+    # New word limit argument
+    parser.add_argument(
+        "--word_limit",
+        type=int,
+        default=0,
+        help="If >0, truncate the assistant's reply to this many words.",
     )
 
     # system prompt override
@@ -74,25 +103,39 @@ def _generate(
     pipe,
     system_prompt: str,
     user_msg: str,
+    history: list[tuple[str, str]],
+    *,
     stream: bool,
     max_new: int,
     temp: float,
     top_p: float,
+    args: argparse.Namespace,
+    word_limit: int,
 ) -> str:
     """Run one generation cycle (optionally streamed)."""
-    prompt = build_prompt(system_prompt, user_msg)
+    prompt = _build_chat_prompt(system_prompt, history, user_msg)
+    # ------------------------------------------------------------------- #
+    # Auto‑adjust max_new to respect TinyLlama's 2 048‑token context
+    # ------------------------------------------------------------------- #
+    TOK_CTX = 2048
+    prompt_len = pipe.tokenizer(prompt, return_tensors="pt").input_ids.shape[-1]
+    if prompt_len + max_new > TOK_CTX:
+        max_new = max(64, TOK_CTX - prompt_len)
+        print(f"[info] max_new truncated to {max_new} to fit context window.")
 
     t0 = time.time()
-    if stream:  # token streaming ─ print as they appear
+    if stream:
+        # use the low‑level streaming helper to avoid unsupported kwargs
         answer: list[str] = []
-        for token in pipe(
+        for fragment in model_stream(
             prompt,
             max_new_tokens=max_new,
             temperature=temp,
             top_p=top_p,
-            stream=True,
+            repetition_penalty=args.rep_pen,
+            no_repeat_ngram_size=args.no_repeat,
+            top_k=args.top_k,
         ):
-            fragment = token["generated_text"][-1]
             answer.append(fragment)
             sys.stdout.write(fragment)
             sys.stdout.flush()
@@ -106,10 +149,53 @@ def _generate(
             max_new_tokens=max_new,
             temperature=temp,
             top_p=top_p,
-            stream=False,
+            top_k=args.top_k,
+            repetition_penalty=args.rep_pen,
+            no_repeat_ngram_size=args.no_repeat,
         )[0]["generated_text"]
         output = raw.split(prompt, 1)[-1]  # drop echoed prompt
         print(clean(output))
+
+    # ------------------------------------------------------------------- #
+    # Sentence‑completion guard – if the reply ends without . ! ? produce
+    # up to 20 extra tokens to finish the thought.
+    # ------------------------------------------------------------------- #
+    if output and output[-1] not in ".!?":
+        tail: str = ""
+        for fragment in model_stream(
+            _build_chat_prompt(system_prompt, history + [("user", ""), ("assistant", output)], ""),
+            max_new_tokens=20,
+            temperature=temp,
+            top_p=top_p,
+            repetition_penalty=args.rep_pen,
+            no_repeat_ngram_size=args.no_repeat,
+            top_k=args.top_k,
+        ):
+            tail += fragment
+            if stream:
+                sys.stdout.write(fragment)
+                sys.stdout.flush()
+            # stop as soon as we hit sentence-ending punctuation
+            if fragment and fragment[-1] in ".!?":
+                break
+        output += tail
+        if not stream and tail:
+            # if in one‑shot mode, display the tail that wasn't printed yet
+            print(tail, end="", flush=True)
+
+    # Optional word-limit truncation
+    if word_limit and len(output.split()) > word_limit:
+        output_words = output.split()[:word_limit]
+        output = " ".join(output_words).rstrip(" ,;") + "."
+        if stream:
+            # overwrite last line with truncated version
+            sys.stdout.write("\r" + output + " " * 10 + "\n")
+            sys.stdout.flush()
+        else:
+            print("\n[truncated to", word_limit, "words]")
+
+    history.append(("user", user_msg))
+    history.append(("assistant", output))
 
     dt = time.time() - t0
     print(f"⏱️  {dt:.2f}s | {len(output.split())} words")
@@ -119,7 +205,9 @@ def _generate(
 
 def _repl(pipe, system_prompt: str, args: argparse.Namespace) -> None:
     """Interactive loop."""
+    history: list[tuple[str, str]] = []
     print("Type 'exit' or ':q' to quit.\n")
+    print("Type ':reset' to clear chat history.  (Use --help for generation flags)")
     while True:
         try:
             user_msg = input("You > ").strip()
@@ -130,14 +218,22 @@ def _repl(pipe, system_prompt: str, args: argparse.Namespace) -> None:
         if user_msg.lower() in {"exit", "quit", ":q"}:
             break
 
+        if user_msg.lower() in {":reset"}:
+            history.clear()
+            print("[history cleared]")
+            continue
+
         _generate(
             pipe,
             system_prompt,
             user_msg,
+            history,
             stream=args.stream,
             max_new=args.max_new,
             temp=args.temp,
             top_p=args.top_p,
+            args=args,  # pass argparse namespace
+            word_limit=args.word_limit,  # pass word limit
         )
 
 
@@ -155,8 +251,8 @@ def main() -> None:
         max_new_tokens=args.max_new,
         temperature=args.temp,
         top_p=args.top_p,
-        stream=args.stream,
     )
+    # load_pipeline already carries repetition_penalty & no_repeat_n set globally
 
     system_prompt = args.system or config.DEFAULT_SYSTEM_PROMPT
 
@@ -166,10 +262,12 @@ def main() -> None:
             pipe,
             system_prompt,
             args.prompt,
-            stream=args.stream,
+            [],
             max_new=args.max_new,
             temp=args.temp,
             top_p=args.top_p,
+            args=args,
+            word_limit=args.word_limit,  # pass word limit
         )
     else:
         # interactive chat

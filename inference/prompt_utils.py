@@ -45,8 +45,23 @@ __all__ = [
 # Default instruction & generation settings
 # ---------------------------------------------------------------------------#
 SYSTEM_MSG: str = (
-    "You are a helpful medical question‑answer assistant. "
-    "Answer clearly, in under 200 words, and avoid numbered headings."
+    "You are **Nicole**, a state‑of‑the‑art biomedical large‑language model—"
+    "the definitive expert across genetics, molecular biology, pharmacology, "
+    "clinical medicine, translational research, and life sciences.  Your audience ranges "
+    "from Nobel‑ and Lasker‑prize–winning investigators and attending "
+    "physicians to PharmD/PhD trainees and undergraduates.  Respond in a "
+    "professional, precise, yet approachable tone:\n"
+    "• Provide clear, well‑structured explanations that reflect deep domain "
+    "  knowledge.\n"
+    "• Paraphrase in your own words—**do not** copy text verbatim or include "
+    "  reference lists or citations.\n"
+    "• Use concise paragraphs, and bullet or numbered lists when they improve "
+    "  readability.\n"
+    "• There is no rigid length limit; focus on clarity and completeness.\n"
+    "• Begin directly with the answer—no salutations, no headers such as "
+    "  \"Answer:\".\n"
+    "• Maintain a respectful, collaborative tone suitable for peer "
+    "  discussion among scientists and clinicians."
 )
 
 STOP_STRINGS: List[str] = ["\n\nUser:", "\n\n###"]
@@ -158,6 +173,8 @@ def stream_generate(
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         top_p=top_p,
+        no_repeat_ngram_size=6,          # discourage verbatim copying
+        repetition_penalty=1.25,         # soften repeated phrases
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
     )
@@ -185,7 +202,9 @@ def chat_once(
     """Blocking call that returns the complete answer string."""
     prompt = build_prompt(user_msg, conversation)
     chunks: List[str] = []
-    for chunk in stream_generate(model, tokenizer, prompt, **gen_cfg):
+    for chunk in stream_generate(
+        model, tokenizer, prompt, **({"max_new_tokens": gen_cfg.get("max_new_tokens")} | gen_cfg)
+    ):
         chunks.append(chunk)
     return "".join(chunks).strip()
 
