@@ -96,6 +96,31 @@ def _efetch_abstract(pmid: str) -> str:
     return " ".join(b.strip() for b in bits if b.strip())
 
 
+def _efetch_pmc_fulltext(pmcid: str) -> str:
+    """
+    Download full‑text XML from PubMed Central and return joined paragraphs.
+    Falls back to empty string if parse fails.
+    """
+    params = {"db": "pmc", "id": pmcid, "retmode": "xml", "api_key": PUBMED_API_KEY}
+    r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=45)
+    r.raise_for_status()
+    time.sleep(REQ_SLEEP_SEC)
+
+    try:
+        root = ET.fromstring(r.text)
+    except ET.ParseError:
+        logger.warning("PMC XML parse error for %s — returning empty text", pmcid)
+        return ""
+
+    # collect paragraph‑level text inside <body>
+    paras = [
+        "".join(p.itertext()).strip()
+        for p in root.findall(".//body//p")
+        if "".join(p.itertext()).strip()
+    ]
+    return "\n\n".join(paras)
+
+
 # --------------------------------------------------------------------------- #
 # public function
 # --------------------------------------------------------------------------- #
@@ -146,16 +171,26 @@ def fetch_articles(
             entry = summary.get(uid, {})
             id_map = {d["idtype"]: d["value"] for d in entry.get("articleids", [])}
 
+            pmcid = id_map.get("pmcid")
+            if pmcid:
+                full_text = _efetch_pmc_fulltext(pmcid)
+                text_body = full_text if full_text else _efetch_abstract(uid)
+                section = "FULL" if full_text else "ABSTRACT"
+            else:
+                text_body = _efetch_abstract(uid)
+                section = "ABSTRACT"
+
             articles.append(
                 {
                     "pmid": uid,
-                    "pmcid": id_map.get("pmcid"),
+                    "pmcid": pmcid,
                     "doi": id_map.get("doi"),
                     "title": entry.get("title"),
                     "authors": [a["name"] for a in entry.get("authors", [])],
                     "journal": entry.get("fulljournalname"),
                     "pubdate": entry.get("pubdate"),
-                    "abstract": _efetch_abstract(uid),
+                    "section": section,
+                    "text": text_body,
                 }
             )
 
@@ -185,6 +220,6 @@ if __name__ == "__main__":  # pragma: no cover
     arts = fetch_articles(demo_query, max_results=40, summary_chunk_size=10)
     print(
         f"\nSummary ▸ total={len(arts)}, "
-        f"pmcid={sum(bool(a['pmcid']) for a in arts)}, "
-        f"abstracts={sum(bool(a['abstract']) for a in arts)}"
+        f"full={sum(a['section']=='FULL' for a in arts)}, "
+        f"abstracts={sum(a['section']=='ABSTRACT' for a in arts)}"
     )
