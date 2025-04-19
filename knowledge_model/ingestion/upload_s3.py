@@ -3,8 +3,8 @@ upload_s3.py
 ------------
 Reusable helpers for uploading artifacts to AWS S3.
 
-• PDFs             → nas-knowledge-model-pdfs/<filename>
-• train.jsonl      → nas-knowledge-model-dataset/train.jsonl
+• PDFs             → nas-knowledge-model-pdfs/<year>/<month>/<filename>
+• train.jsonl      → nas-knowledge-model-dataset/<prefix>/YYYY/MM/train.jsonl
 • clean chunks     → nas-knowledge-model-dataset/clean/YYYY/MM/<filename>
 """
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional, Union
+from datetime import datetime, UTC as _UTC
 
 import boto3
 import threading
@@ -109,32 +110,51 @@ def upload_directory(
     return urls
 
 
-def upload_pdf_to_s3(file_path: str) -> str:
+def upload_pdf_to_s3(
+    file_path: str,
+    *,
+    year: str | None = None,
+    month: str | None = None,
+) -> str:
     """
-    Upload a single PDF to the dedicated PDF bucket.
+    Upload a single PDF to nas-knowledge-model-pdfs/year/month/filename.
 
-    Args:
-        file_path: Path to the PDF file.
+    If year/month are omitted, current UTC YYYY/MM are used.
 
-    Returns:
-        HTTPS URL of uploaded PDF.
+    Returns the HTTPS URL of the uploaded PDF.
     """
+    if year is None or month is None:
+        now = datetime.now(_UTC)
+        year = year or f"{now.year:04d}"
+        month = month or f"{now.month:02d}"
+
     filename = os.path.basename(file_path)
-    return _upload_file(file_path, S3_PDF_BUCKET, filename)
+    key = f"{year}/{month}/{filename}"
+    return _upload_file(file_path, S3_PDF_BUCKET, key)
 
 
-def upload_dataset_to_s3(file_path: str) -> str:
+def upload_dataset_to_s3(
+    file_path: str,
+    *,
+    year: str | None = None,
+    month: str | None = None,
+    prefix: str = "",
+) -> str:
     """
-    Upload a dataset file (e.g. train.jsonl) to the dataset root.
+    Upload a dataset file into nas-knowledge-model-dataset/{prefix}/YYYY/MM/filename.
 
-    Args:
-        file_path: Path to the dataset.
-
-    Returns:
-        HTTPS URL of uploaded dataset.
+    If year/month omitted, uses current UTC date. `prefix` can be "" or
+    something like "raw" or "combined".
     """
+    if year is None or month is None:
+        now = datetime.now(_UTC)
+        year = year or f"{now.year:04d}"
+        month = month or f"{now.month:02d}"
+
     filename = os.path.basename(file_path)
-    return _upload_file(file_path, S3_DATASET_BUCKET, filename)
+    key_prefix = f"{prefix}/" if prefix else ""
+    key = f"{key_prefix}{year}/{month}/{filename}"
+    return _upload_file(file_path, S3_DATASET_BUCKET, key)
 
 
 def upload_clean_chunk(file_path: str, year: str, month: str) -> str:

@@ -25,7 +25,7 @@ tqdm_kwargs = {"mininterval": 1.0, "unit_scale": True}
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import Article, ArticleChunk
 from knowledge_model.ingestion.download_pdf import download_pmc_pdf
-from knowledge_model.ingestion.fetch_pubmed import fetch_articles
+from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract  # internal helper
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
 from knowledge_model.processing.text_cleaner import clean_text, chunk_text
@@ -42,7 +42,7 @@ def _month_query(year: str, month: str) -> str:
     last_day = calendar.monthrange(int(year), int(month))[1]
     start = f'"{year}/{month}/01"[PDAT]'
     end = f'"{year}/{month}/{last_day:02d}"[PDAT]'
-    filters = "hasabstract[text] AND free full text[sb]"
+    filters = "hasabstract[text]"                 # OA not required; abstracts OK
     types = "(clinicaltrial[pt] OR review[pt] OR research-article[pt])"
     return f"({start} : {end}) AND {filters} AND {types}"
 
@@ -97,19 +97,33 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             title = clean_text(art.get("title") or "Untitled")
             authors = ", ".join(art.get("authors", []))
             journal = clean_text(art.get("journal") or "") or None
-            abstract = clean_text(art.get("abstract") or "") or None
+            raw_text = clean_text(art.get("text") or "")
+            section_label = art.get("section", "UNKNOWN")
 
             pdf_url: str | None = None
             chunks: list[str] = []
             downloaded = False
+            abstract_text = ""
 
             if pmcid and not (existing and existing.pdf_downloaded):
                 stats["pmc"] += 1
                 try:
                     pdf_path = download_pmc_pdf(pmcid)
                     parsed = parse_pdf(pdf_path)
+
+                    # Fetch abstract even when full text is available
+                    try:
+                        abstract_text = clean_text(_efetch_abstract(pmid))
+                    except Exception:
+                        abstract_text = ""
+
                     cleaned = clean_text(parsed["text"])
                     chunks = chunk_text(cleaned, chunk_size)
+
+                    # prepend abstract as its own chunk
+                    if abstract_text:
+                        chunks.insert(0, abstract_text)
+
                     pdf_url = upload_dataset_to_s3(pdf_path)
                     os.remove(pdf_path)
                     downloaded = True
@@ -119,17 +133,28 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                 except Exception as err:
                     logger.warning("PDF failed for %s (%s): %s", pmid, pmcid, err)
 
+            # If no PDF downloaded (non‑OA) but we still have text (abstract),
+            # treat it as a single chunk for downstream training.
+            if not downloaded and raw_text:
+                chunks = chunk_text(raw_text, chunk_size)
+                stats["chunks"] += len(chunks)
+
             article = existing or Article(
                 pmid=pmid,
                 title=title,
                 authors=authors,
                 journal=journal,
                 pubdate=pubdate,
-                abstract=abstract,
+                abstract=(
+                    abstract_text
+                    if downloaded and abstract_text
+                    else (raw_text if section_label == "ABSTRACT" else None)
+                ),
                 pdf_s3_url=pdf_url,
                 doi=doi,
                 pdf_downloaded=downloaded,
                 content=None,
+                section=section_label,  # Add this line if the SQL model supports it
             )
             db.add(article)
             db.commit()
