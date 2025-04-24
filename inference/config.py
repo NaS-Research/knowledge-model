@@ -1,31 +1,30 @@
 """
-inference/config.py
--------------------
+inference.config
+-----------------
+Centralised, strongly‑typed settings object that controls **all** post‑training
+inference behaviour: model paths, hardware flags, and generation defaults.
 
-Centralised configuration object for everything that happens **after**
-training – loading the base model, applying LoRA adapters and controlling
-generation parameters.
+Example:
+    ```python
+    from inference.config import settings, generation_kwargs
 
-Edit values here (or via env‑vars) instead of sprinkling “magic numbers”
-throughout the code‑base.
+    model_id = settings.base_model
+    generate_args = generation_kwargs()
+    ```
 """
 
 from pathlib import Path
 from typing import Dict, Any
+import logging
 
-from pydantic_settings import BaseSettings  # Pydantic v2 moved BaseSettings to this package
-from pydantic import Field, validator       # Field & validator still live in core pydantic
+logger = logging.getLogger(__name__)
+
+from pydantic_settings import BaseSettings
+from pydantic import Field, validator 
 import torch
 
 
-# --------------------------------------------------------------------------- #
-# Settings dataclass
-# --------------------------------------------------------------------------- #
-
 class InferenceSettings(BaseSettings):
-    # --------------------------------------------------------------------- #
-    # Model artefacts
-    # --------------------------------------------------------------------- #
     base_model: str = Field(
         default="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         description="HF model id or local path for the *base* model weights",
@@ -35,9 +34,6 @@ class InferenceSettings(BaseSettings):
         description="Folder that contains the LoRA adapter weights & tokenizer",
     )
 
-    # --------------------------------------------------------------------- #
-    # Hardware / execution
-    # --------------------------------------------------------------------- #
     device: str = Field(
         default="mps",  # overrides: export DEVICE=cuda:0
         description="torch device: 'cuda:0' | 'mps' | 'cpu'",
@@ -47,9 +43,6 @@ class InferenceSettings(BaseSettings):
         description="torch.dtype for model weights – keep fp16 on consumer GPUs",
     )
 
-    # --------------------------------------------------------------------- #
-    # Decoding / generation defaults
-    # --------------------------------------------------------------------- #
     max_new_tokens: int = 800
     temperature: float = 0.5
     top_p: float = 0.9
@@ -61,63 +54,60 @@ class InferenceSettings(BaseSettings):
         description="Enable nucleus/temperature sampling. "
                     "Set False to force greedy decoding."
     )
-    stream: bool = False  # set True in serve_fastapi for SSE streaming
+    stream: bool = False
 
-    # --------------------------------------------------------------------- #
-    # Prompt engineering
-    # --------------------------------------------------------------------- #
     system_prompt: str = (
         "You are a helpful biomedical assistant. "
         "Answer clearly in plain language and cite sources when available."
     )
 
-    # --------------------------------------------------------------------- #
-    # Miscellaneous
-    # --------------------------------------------------------------------- #
     log_level: str = "INFO"
     seed: int = 42
 
-    # --------------------------------------------------------------------- #
-    # Validators – convert str → torch.dtype & sanity‑check device
-    # --------------------------------------------------------------------- #
     @validator("dtype", pre=True)
     def _as_torch_dtype(cls, v):
-        """
-        Allow passing 'float16', 'bfloat16' etc. as env‑vars / CLI flags
-        and transparently turn them into real torch.dtypes.
+        """Convert string representation of dtype to torch.dtype.
+
+        Args:
+            v: The value to convert.
+
+        Returns:
+            Corresponding torch.dtype.
+
+        Raises:
+            ValueError: If the dtype is unsupported.
         """
         if isinstance(v, str):
             try:
                 return getattr(torch, v)
             except AttributeError as exc:
+                logger.error("Unsupported dtype '%s'", v)
                 raise ValueError(f"Unsupported dtype '{v}'") from exc
         return v
 
     @validator("device", pre=True)
     def _normalise_device(cls, v):
-        """
-        Accept shorthand like 'cuda' → cuda:0
+        """Normalize device shorthand.
+
+        Args:
+            v: The device string to normalize.
+
+        Returns:
+            Normalized device string.
         """
         if v == "cuda":
             return "cuda:0"
         return v
 
     class Config:
-        env_prefix = ""  # allow bare env names like DEVICE, MAX_NEW_TOKENS
+        env_prefix = ""
         case_sensitive = False
 
 
-# Only instantiate once so every import shares the same object
 settings = InferenceSettings()
 
-## --------------------------------------------------------------------------- #
-## 🔄  Legacy constant aliases (back‑compat with older code paths)
-## --------------------------------------------------------------------------- #
-## Older parts of the code‑base (e.g. inference/model.py) still reference
-## attributes such as `Config.BASE_MODEL_ID` that previously lived on a static
-## Config class.  We patch equivalent constants onto the new Pydantic class
-## *after* instantiation so they inherit any env‑var / CLI overrides.
-InferenceSettings.BASE_MODEL_ID = settings.base_model          # type: ignore[attr-defined]
+
+InferenceSettings.BASE_MODEL_ID = settings.base_model
 InferenceSettings.ADAPTER_DIR  = settings.adapter_dir
 InferenceSettings.DEVICE       = settings.device
 InferenceSettings.DTYPE        = settings.dtype
@@ -129,27 +119,28 @@ InferenceSettings.TOP_K              = settings.top_k
 InferenceSettings.REPETITION_PENALTY = settings.repetition_penalty
 InferenceSettings.DO_SAMPLE          = settings.do_sample
 InferenceSettings.NO_REPEAT_NGRAM_SIZE = settings.no_repeat_ngram_size
-# Defaults expected by CLI helpers
 InferenceSettings.DEFAULT_ADAPTER_DIR  = settings.adapter_dir
 InferenceSettings.DEFAULT_SYSTEM_PROMPT = settings.system_prompt
 
-# --------------------------------------------------------------------------- #
-# 🔁  Auto‑export *every* settings field as an UPPER‑CASE constant
-# --------------------------------------------------------------------------- #
+
 for _field, _value in settings.model_dump().items():
     const_name = _field.upper()
-    # Skip constants we explicitly mapped above
     if not hasattr(InferenceSettings, const_name):
         setattr(InferenceSettings, const_name, _value)
 
 
-# --------------------------------------------------------------------------- #
-# Helper utilities
-# --------------------------------------------------------------------------- #
 def generation_kwargs(extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    """
-    Convenience helper used by CLI / FastAPI.
-    Returns a dict you can splat directly into `model.generate(**kwargs)`.
+    """Build a dict of `model.generate` kwargs.
+
+    Args:
+        extra: Optional overrides that will update the defaults.
+
+    Returns:
+        Fully‑populated kwargs dictionary ready to splat into
+        `transformers.PreTrainedModel.generate`.
+
+    Notes:
+        Pure helper – no I/O or side effects.
     """
     kwargs: Dict[str, Any] = {
         "max_new_tokens": settings.max_new_tokens,
@@ -164,20 +155,9 @@ def generation_kwargs(extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
         kwargs.update(extra)
     return kwargs
 
-# --------------------------------------------------------------------------- #
-# 🛠  Back‑compat alias
-# --------------------------------------------------------------------------- #
-# Older parts of the code‑base (e.g. inference/model.py) expect a top‑level
-# object named `Config`.  Instead of updating every call‑site we expose a thin
-# alias that points at the new Pydantic class.
-#
-#     from inference.config import Config
-#
-# now returns the same object as `InferenceSettings`.
-#
-Config = InferenceSettings  # type: ignore
 
-# Module‑level passthroughs so callers can import directly:
+Config = InferenceSettings
+
 DEFAULT_ADAPTER_DIR = settings.adapter_dir
 DEFAULT_SYSTEM_PROMPT = settings.system_prompt
 DEVICE = settings.device

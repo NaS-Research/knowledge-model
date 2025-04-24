@@ -25,15 +25,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from inference.config import Settings
-from inference.model import load_model  # lazy load helper
-from inference.postprocess import clean_output  # output‑tidy helper
+from inference.model import load_model
+from inference.postprocess import clean_output 
 
 logger = logging.getLogger(__name__)
 settings = Settings()
 
-###############################################################################
-# Model bootstrap – happens **once** at import‑time so the first request is fast
-###############################################################################
 logger.info("Loading model + adapter …")
 tokenizer, lm = load_model(
     adapter_path=settings.adapter_path,
@@ -41,9 +38,6 @@ tokenizer, lm = load_model(
 )
 logger.info("Model ready ✓")
 
-###############################################################################
-# FastAPI plumbing
-###############################################################################
 app = FastAPI(
     title="NaS TinyLlama Inference",
     version="0.1.0",
@@ -106,7 +100,6 @@ def generate(req: GenerateRequest) -> GenerateResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    # Simple CLI fallback so you can `python inference/server.py`
     uvicorn.run(
         "inference.server:app",
         host="0.0.0.0",

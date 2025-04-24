@@ -44,9 +44,6 @@ DEVICE: str = "mps" if torch.backends.mps.is_available() else "cpu"
 app = FastAPI(title="TinyLlama‑Health – local inference")
 
 
-# --------------------------------------------------------------------------- #
-#  Model loading helpers                                                      #
-# --------------------------------------------------------------------------- #
 @lru_cache(maxsize=1)
 def _load_tokenizer():
     tok = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True)
@@ -78,9 +75,6 @@ def _load_model():
     return model
 
 
-# --------------------------------------------------------------------------- #
-#  Streaming utility                                                          #
-# --------------------------------------------------------------------------- #
 def _stream_generation(prompt: str, max_tokens: int = 512) -> AsyncGenerator[str, None]:
     """
     Yields generated tokens one‑by‑one so the client can stream them.
@@ -100,7 +94,6 @@ def _stream_generation(prompt: str, max_tokens: int = 512) -> AsyncGenerator[str
         temperature=0.7,
     )
 
-    # Launch generation in background thread
     from threading import Thread
 
     thread = Thread(target=model.generate, kwargs=gen_kwargs)
@@ -113,9 +106,6 @@ def _stream_generation(prompt: str, max_tokens: int = 512) -> AsyncGenerator[str
     yield "data: [DONE]\n\n"
 
 
-# --------------------------------------------------------------------------- #
-#  Routes                                                                     #
-# --------------------------------------------------------------------------- #
 @app.get("/health", response_class=JSONResponse)
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -130,7 +120,6 @@ async def chat(req: Request):
     if not prompt_raw:
         raise HTTPException(status_code=400, detail="prompt field is required")
 
-    # Build system‑style prompt (role + user text wrapped)
     prompt = build_prompt(prompt_raw)
 
     logger.info("Received prompt of %d chars, max_tokens=%d", len(prompt_raw), max_tokens)

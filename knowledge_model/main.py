@@ -8,6 +8,7 @@ POST /ask
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import torch
 from fastapi import FastAPI
@@ -18,20 +19,32 @@ from peft import PeftModel
 
 from knowledge_model.embeddings.vector_store import LocalFaiss
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+
 EMBEDDER_ID = "all-MiniLM-L6-v2"
 BASE_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-ADAPTER_PATH = "adapters/tinyllama-health"
+ADAPTER_PATH = "adapters/nicole-v2"
+FAISS_PATH = "data/faiss"
 
 embedder = SentenceTransformer(
     EMBEDDER_ID,
     device="mps" if torch.backends.mps.is_available() else "cpu",
 )
-store = LocalFaiss.load()
+
+try:
+    # Use the classmethod loader to properly initialise from disk.
+    store = LocalFaiss.load(FAISS_PATH)
+except FileNotFoundError as exc:
+    logger.error("FAISS index not found at %s", FAISS_PATH)
+    raise
 
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+dtype = torch.float16 if torch.backends.mps.is_available() else torch.float32
 base_model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL,
-    torch_dtype=torch.float16,
+    torch_dtype=dtype,
     device_map="cpu",
     low_cpu_mem_usage=True,
 )
@@ -39,6 +52,8 @@ if torch.backends.mps.is_available():
     base_model = base_model.to("mps")
 
 model = PeftModel.from_pretrained(base_model, ADAPTER_PATH).eval()
+
+logger.info("Model and FAISS store loaded; ready to serve.")
 
 app = FastAPI(title="TinyLlama-RAG")
 
@@ -48,7 +63,12 @@ class AskRequest(BaseModel):
     k: int = 3
 
 
-def pack_context(passages: list[dict], max_tokens: int = 1800) -> list[dict]:
+class AskResponse(BaseModel):
+    answer: str
+    sources: list[dict]
+
+
+def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
     selected, used = [], 0
     for p in passages:
         n_tok = len(tokenizer.tokenize(p["text"]))
@@ -87,7 +107,6 @@ def rag_answer(query: str, k: int = 3) -> dict:
     return {"answer": answer, "sources": results}
 
 
-@app.post("/ask")
-def ask(req: AskRequest) -> dict:
-    return rag_answer(req.text, req.k)
-# testt
+@app.post("/ask", response_model=AskResponse)
+def ask(req: AskRequest) -> AskResponse:
+    return AskResponse(**rag_answer(req.text, req.k))

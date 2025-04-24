@@ -1,52 +1,141 @@
-"""
-Builds and queries a local Faiss index of article chunks.
-"""
+"""Builds and queries a local Faiss index of article chunks.
 
-from __future__ import annotations
+Example:
+    store = LocalFaiss.load()
+    results = store.search(query_vector)
+"""
 
 import json
+import logging
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Dict, Optional
 
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-EMBEDDER_ID = "all-MiniLM-L6-v2"
+DEFAULT_EMBEDDER_ID = "all-MiniLM-L6-v2"
+DEFAULT_TOP_K = 5
 INDEX_PATH = Path("data/faiss.idx")
 META_PATH = Path("data/faiss.idx.meta")
 CLEAN_DIR = Path("data/clean")
 
 
+def _device() -> str:
+    """Determine the device to use for embedding.
+
+    Returns:
+        str: 'mps' if available, otherwise 'cpu'.
+    """
+    import torch
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 class LocalFaiss:
-    """Wrapper around a local FAISS index with chunk metadata."""
+    """Wrapper around a local FAISS index with chunk metadata.
+
+    Args:
+        dim (int): Dimension of the vectors to be indexed.
+    """
 
     def __init__(self, dim: int) -> None:
         self.dim = dim
         self.index = faiss.IndexFlatIP(dim)
-        self.meta: list[dict[str, Any]] = []
+        self.meta: List[Dict[str, Any]] = []
 
-    def add(self, vecs: np.ndarray, metas: list[dict[str, Any]]) -> None:
+    def add(self, vecs: np.ndarray, metas: List[Dict[str, Any]]) -> None:
+        """Add vectors and their metadata to the index.
+
+        Args:
+            vecs (np.ndarray): Array of vectors to add.
+            metas (List[Dict[str, Any]]): Corresponding metadata for each vector.
+        """
         self.index.add(vecs.astype("float32"))
         self.meta.extend(metas)
 
-    def save(self) -> None:
-        faiss.write_index(self.index, str(INDEX_PATH))
-        META_PATH.write_bytes(pickle.dumps(self.meta))
+    def save(self, outdir: Path | str | None = None) -> None:
+        """Persist the FAISS index and metadata.
+
+        Args:
+            outdir: Directory (or file stem) to write to.  
+                    • If *None*, falls back to the default INDEX_PATH.  
+                    • If a directory, writes `<outdir>/faiss.idx` and
+                      `<outdir>/faiss.idx.meta`.  
+                    • If a path ending with “.idx”, uses that exact file name.
+        """
+        # Resolve target paths -------------------------------------------------
+        if outdir is None:
+            idx_path = INDEX_PATH
+        else:
+            out = Path(outdir)
+            if out.is_dir():
+                idx_path = out / "faiss.idx"
+            elif out.suffix == ".idx":
+                idx_path = out
+            else:
+                idx_path = out.with_suffix(".idx")
+            idx_path.parent.mkdir(parents=True, exist_ok=True)
+
+        meta_path = idx_path.with_suffix(".idx.meta")
+
+        # ---------------------------------------------------------------------
+        try:
+            faiss.write_index(self.index, str(idx_path))
+            meta_path.write_bytes(pickle.dumps(self.meta))
+            logging.info(
+                "Saved FAISS index (%d vectors) → %s",
+                len(self.meta),
+                idx_path.parent,
+            )
+        except Exception as exc:  # pragma: no cover
+            logging.error("Failed to save FAISS artefacts: %s", exc)
+            raise
 
     @classmethod
-    def load(cls) -> LocalFaiss:
-        if not INDEX_PATH.exists():
-            raise FileNotFoundError("Index not built yet.")
-        idx = faiss.read_index(str(INDEX_PATH))
-        meta = pickle.loads(META_PATH.read_bytes())
+    def load(cls, path: Path | str | None = None) -> "LocalFaiss":
+        """Load the FAISS index and metadata from disk.
+
+        Optionally specify a custom path for the index file; defaults to INDEX_PATH for backward compatibility.
+
+        Args:
+            path (Path | str | None, optional): Custom index file location.
+
+        Returns:
+            LocalFaiss: Loaded LocalFaiss instance.
+
+        Raises:
+            FileNotFoundError: If the index file does not exist.
+        """
+        # Path resolution logic for index file
+        idx_path = Path(path) if path is not None else INDEX_PATH
+        if idx_path.is_dir():
+            idx_path = idx_path / "faiss.idx"
+        elif idx_path.suffix == "":
+            idx_path = idx_path.with_suffix(".idx")
+        meta_path = idx_path.with_suffix(".idx.meta")
+        if not idx_path.exists():
+            raise FileNotFoundError(f"FAISS index not found at {idx_path}")
+        idx = faiss.read_index(str(idx_path))
+        meta = pickle.loads(meta_path.read_bytes())
         store = cls(idx.d)
         store.index = idx
         store.meta = meta
+        logging.info(f"Loaded FAISS index with {len(store.meta)} chunks from {idx_path}")
         return store
 
-    def search(self, vec: np.ndarray, k: int = 5) -> list[dict[str, Any]]:
+    def search(self, vec: np.ndarray, k: int = DEFAULT_TOP_K) -> List[Dict[str, Any]]:
+        """Search the index for the top k most similar vectors.
+
+        Args:
+            vec (np.ndarray): Query vector.
+            k (int, optional): Number of top results to return. Defaults to DEFAULT_TOP_K.
+
+        Returns:
+            List[Dict[str, Any]]: List of metadata dicts with added 'score' key.
+        """
         D, I = self.index.search(vec.astype("float32"), k)
         return [
             self.meta[i] | {"score": float(D[0][j])}
@@ -55,11 +144,17 @@ class LocalFaiss:
 
 
 def build_store(clean_dir: Path = CLEAN_DIR) -> None:
+    """Build and save a FAISS index from cleaned article chunks.
+
+    Args:
+        clean_dir (Path, optional): Directory containing cleaned JSON files. Defaults to CLEAN_DIR.
+    """
+    logging.basicConfig(level=logging.INFO)
     embedder = SentenceTransformer(
-        EMBEDDER_ID,
-        device="mps" if hasattr(__import__('torch'), 'backends') and __import__('torch').backends.mps.is_available() else "cpu",
+        DEFAULT_EMBEDDER_ID,
+        device=_device(),
     )
-    store: LocalFaiss | None = None
+    store: Optional[LocalFaiss] = None
 
     for jf in clean_dir.rglob("*.json"):
         rec = json.loads(jf.read_text())
@@ -76,9 +171,9 @@ def build_store(clean_dir: Path = CLEAN_DIR) -> None:
     if store:
         INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
         store.save()
-        print(f"Indexed {len(store.meta)} chunks → {INDEX_PATH}")
+        logging.info(f"Indexed {len(store.meta)} chunks → {INDEX_PATH}")
     else:
-        print("No chunks found. Did you run text_cleaner?")
+        logging.warning("No chunks found. Did you run text_cleaner?")
 
 
 if __name__ == "__main__":
