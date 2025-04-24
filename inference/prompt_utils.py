@@ -41,9 +41,6 @@ __all__ = [
     "chat_once",
 ]
 
-# ---------------------------------------------------------------------------#
-# Default instruction & generation settings
-# ---------------------------------------------------------------------------#
 SYSTEM_MSG: str = (
     "You are **Nicole**, a state‑of‑the‑art biomedical large‑language model—"
     "the definitive expert across genetics, molecular biology, pharmacology, "
@@ -66,21 +63,15 @@ SYSTEM_MSG: str = (
 
 STOP_STRINGS: List[str] = ["\n\nUser:", "\n\n###"]
 
-# Safety against accidental context overflow for TinyLlama (2 048 tokens ctx)
 MAX_INPUT_TOKENS: int = 1024        # prompt (system + history + user)
-MAX_OUTPUT_TOKENS: int = 256        # can be overridden per request
+MAX_OUTPUT_TOKENS: int = 256
 
-# ---------------------------------------------------------------------------#
-# Internal helpers
-# ---------------------------------------------------------------------------#
+
 def _truncate(tokens: List[int], max_len: int) -> List[int]:
     """Keep only the last `max_len` tokens."""
     return tokens if len(tokens) <= max_len else tokens[-max_len:]
 
 
-# ---------------------------------------------------------------------------#
-# Prompt assembly
-# ---------------------------------------------------------------------------#
 def build_prompt(
     user_msg: str,
     conversation: str | None = None,
@@ -106,13 +97,11 @@ def build_prompt(
     if conversation:
         parts.append(conversation.strip())
     parts.append(f"### User:\n{user_msg.strip()}")
-    parts.append("### Assistant:\n")     # model will complete after this
+    parts.append("### Assistant:\n")
     return "\n\n".join(parts)
 
 
-# ---------------------------------------------------------------------------#
-# Model loader
-# ---------------------------------------------------------------------------#
+
 def load_model(
     model_id: str,
     adapter_dir: Path | None = None,
@@ -138,9 +127,7 @@ def load_model(
     return model, tokenizer
 
 
-# ---------------------------------------------------------------------------#
-# Streaming generation
-# ---------------------------------------------------------------------------#
+
 def stream_generate(
     model,
     tokenizer,
@@ -173,25 +160,20 @@ def stream_generate(
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         top_p=top_p,
-        no_repeat_ngram_size=6,          # discourage verbatim copying
-        repetition_penalty=1.25,         # soften repeated phrases
+        no_repeat_ngram_size=6,
+        repetition_penalty=1.25,
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
     )
 
-    # run generate() in a background thread so we can iterate over the streamer
     threading.Thread(target=model.generate, kwargs=gen_kwargs, daemon=True).start()
 
     for text in streamer:
-        # Early stop if model emits any stop string
         if any(stop in text for stop in STOP_STRINGS):
             break
         yield text
 
 
-# ---------------------------------------------------------------------------#
-# Convenience wrapper
-# ---------------------------------------------------------------------------#
 def chat_once(
     model,
     tokenizer,
@@ -209,9 +191,6 @@ def chat_once(
     return "".join(chunks).strip()
 
 
-# ---------------------------------------------------------------------------#
-# CLI smoke‑test
-# ---------------------------------------------------------------------------#
 if __name__ == "__main__":
     import argparse
     import sys

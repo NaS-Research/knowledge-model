@@ -7,6 +7,8 @@ from typing import Any
 
 import fitz
 import re
+_HEADER_FOOTER_RE = re.compile(r"^(?:Page \d+(?: of \d+)?|©.*|Copyright.*|All rights reserved\.?)$", re.IGNORECASE)
+_DIGIT_LINE_RE = re.compile(r"^\s*\d+\s*$")
 
 logger = logging.getLogger(__name__)
 

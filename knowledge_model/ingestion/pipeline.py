@@ -12,20 +12,18 @@ import logging
 import os
 import re
 import sys
-from tqdm import tqdm  # progress bar
+from tqdm import tqdm
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, List
 
-# progress‑log frequency (default 10 if not set in .env)
 PROGRESS_EVERY: int = int(os.getenv("PIPELINE_PROGRESS_EVERY", "10"))
-# usage comment not needed
 tqdm_kwargs = {"mininterval": 1.0, "unit_scale": True}
 
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import Article, ArticleChunk
 from knowledge_model.ingestion.download_pdf import download_pmc_pdf
-from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract  # internal helper
+from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract 
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
 from knowledge_model.processing.text_cleaner import clean_text, chunk_text
@@ -42,7 +40,7 @@ def _month_query(year: str, month: str) -> str:
     last_day = calendar.monthrange(int(year), int(month))[1]
     start = f'"{year}/{month}/01"[PDAT]'
     end = f'"{year}/{month}/{last_day:02d}"[PDAT]'
-    filters = "hasabstract[text]"                 # OA not required; abstracts OK
+    filters = "hasabstract[text]"
     types = "(clinicaltrial[pt] OR review[pt] OR research-article[pt])"
     return f"({start} : {end}) AND {filters} AND {types}"
 
@@ -76,7 +74,7 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
     logger.info("Fetched %d articles", len(articles))
 
     try:
-        year, month = re.search(r'"(\d{4})/(\d{2})/01"\[PDAT]', query).groups()  # type: ignore
+        year, month = re.search(r'"(\d{4})/(\d{2})/01"\[PDAT]', query).groups()
     except AttributeError:
         logger.error("Could not extract year/month from query")
         sys.exit(1)
@@ -111,7 +109,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                     pdf_path = download_pmc_pdf(pmcid)
                     parsed = parse_pdf(pdf_path)
 
-                    # Fetch abstract even when full text is available
                     try:
                         abstract_text = clean_text(_efetch_abstract(pmid))
                     except Exception:
@@ -120,7 +117,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                     cleaned = clean_text(parsed["text"])
                     chunks = chunk_text(cleaned, chunk_size)
 
-                    # prepend abstract as its own chunk
                     if abstract_text:
                         chunks.insert(0, abstract_text)
 
@@ -133,8 +129,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                 except Exception as err:
                     logger.warning("PDF failed for %s (%s): %s", pmid, pmcid, err)
 
-            # If no PDF downloaded (non‑OA) but we still have text (abstract),
-            # treat it as a single chunk for downstream training.
             if not downloaded and raw_text:
                 chunks = chunk_text(raw_text, chunk_size)
                 stats["chunks"] += len(chunks)
@@ -154,7 +148,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                 doi=doi,
                 pdf_downloaded=downloaded,
                 content=None,
-                section=section_label,  # Add this line if the SQL model supports it
             )
             db.add(article)
             db.commit()
@@ -163,7 +156,8 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             if i % PROGRESS_EVERY == 0:
                 logger.info("Processed %d / %d articles so far", i, len(articles))
 
-            if downloaded and chunks:
+            # Persist any chunks (PDF full‑text or abstract‑only)
+            if chunks:
                 for chunk_idx, txt in enumerate(chunks):
                     db.add(ArticleChunk(article_id=article.id, chunk_index=chunk_idx, chunk_text=txt))
                 db.commit()

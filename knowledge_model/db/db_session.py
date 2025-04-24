@@ -13,13 +13,10 @@ from knowledge_model.db.sql_models import Base
 
 logger = logging.getLogger(__name__)
 
-# Read DB URL from an environment variable or default to a local SQLite file
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///knowledge_model.db")
 
-# Create the engine
 engine = create_engine(DATABASE_URL, echo=False)
 
-# Create a configured "Session" class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

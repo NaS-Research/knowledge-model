@@ -20,11 +20,8 @@ import textwrap
 from dataclasses import dataclass
 from typing import List, Set
  
-# --------------------------------------------------------------------------- #
-# configuration constants – tweak as needed
-# --------------------------------------------------------------------------- #
+
  
-# Tokens we never want to surface to the user
 _SPECIAL_TOKENS: Set[str] = {
     "<pad>",
     "<unk>",
@@ -36,10 +33,8 @@ _SPECIAL_TOKENS: Set[str] = {
     "###",
 }
  
-# Regex to find simple inline citations.  Extend if you adopt a new style.
 _CIT_RE = re.compile(r"(PMID|PMCID|DOI):\s*\S+", flags=re.IGNORECASE)
 
-# Remove everything from the first boiler‑plate header onward
 _SECTION_HEAD_RE = re.compile(
     r"\b("
     r"Acknowledg(e)?ments?|Funding|Disclosure|Conflict(s)? of Interest|"
@@ -48,9 +43,7 @@ _SECTION_HEAD_RE = re.compile(
     flags=re.IGNORECASE | re.DOTALL,
 )
  
-# --------------------------------------------------------------------------- #
-# return container
-# --------------------------------------------------------------------------- #
+
 @dataclass
 class PostProcessResult:
     """Clean answer plus any citations we spotted."""
@@ -58,9 +51,6 @@ class PostProcessResult:
     citations: List[str]
  
  
-# --------------------------------------------------------------------------- #
-# helper functions – kept private
-# --------------------------------------------------------------------------- #
 def _strip_special_tokens(raw: str) -> str:
     """Remove reserved tokens inserted by tokenizer / prompting template."""
     for tok in _SPECIAL_TOKENS:
@@ -110,10 +100,6 @@ def _extract_citations(txt: str) -> List[str]:
     """Return a *unique* list of inline citations we recognise."""
     return list(dict.fromkeys(match.group(0) for match in _CIT_RE.finditer(txt)))
  
- 
-# --------------------------------------------------------------------------- #
-# public entry point
-# --------------------------------------------------------------------------- #
 def postprocess(raw_output: str, *, max_words: int | None = 200) -> PostProcessResult:
     """
     Clean `raw_output` from the model and return a structured result.
@@ -139,9 +125,6 @@ def postprocess(raw_output: str, *, max_words: int | None = 200) -> PostProcessR
  
     return PostProcessResult(text=txt, citations=_extract_citations(txt))
 
-# --------------------------------------------------------------------------- #
-# Back‑compat shim – simple `clean()` alias
-# --------------------------------------------------------------------------- #
 def clean(raw_output: str) -> str:
     """
     Lightweight wrapper kept for older callers (e.g. cli_chat) that only

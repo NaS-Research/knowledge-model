@@ -18,8 +18,8 @@ from datetime import datetime, UTC as _UTC
 import boto3
 import threading
 try:
-    from tqdm.auto import tqdm  # progress bar
-except ImportError:  # fallback if tqdm isn't installed
+    from tqdm.auto import tqdm 
+except ImportError:
     tqdm = None
 
 class _TqdmCallback:
@@ -45,7 +45,6 @@ class _TqdmCallback:
             self._seen += bytes_amount
             if self._bar:
                 self._bar.update(bytes_amount)
-            # fall‑back: basic percentage if tqdm is missing
             elif self._size:
                 pct = (self._seen / self._size) * 100
                 print(f"\rUploading {self._filename.name}: {pct:5.1f}% ", end="", flush=True)
