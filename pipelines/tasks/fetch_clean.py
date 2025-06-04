@@ -25,14 +25,36 @@ from typing import Tuple
 
 from prefect import task, get_run_logger
 
-from knowledge_model.ingestion.pipeline import (
-    run_pipeline,
-    _first_missing_month,
-    _month_query,
-)
+from knowledge_model.ingestion.pipeline import run_pipeline, _month_query
+from datetime import date
 
-# Root where cleaned text is written by the ingestion pipeline
+ # Root where cleaned text is written by the ingestion pipeline
 CLEAN_DIR = Path("data/clean")
+
+
+# --------------------------------------------------------------------------- #
+# Helper: detect first missing YYYY/MM                                        #
+# --------------------------------------------------------------------------- #
+def _first_missing_month() -> tuple[str, str]:
+    """
+    Return (YYYY, MM) for the earliest month that has not yet been ingested.
+    Scans from 2013-01 up to the current month, looking for the first
+    data/clean/YYYY/MM directory that does not exist.
+    """
+    start_year = 2013
+    today = date.today()
+
+    for year in range(start_year, today.year + 1):
+        for month in range(1, 13):
+            # stop scanning beyond the current month
+            if year == today.year and month > today.month:
+                break
+            y, m = str(year), f"{month:02d}"
+            if not (CLEAN_DIR / y / m).exists():
+                return y, m
+
+    raise RuntimeError("All months up to the present have been processed.")
+
 
 
 def _ensure_dir(path: Path) -> None:
