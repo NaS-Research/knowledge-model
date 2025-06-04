@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Tuple
 
 from knowledge_model.ingestion.pipeline import run_pipeline, _month_query
-from knowledge_model.ingestion.build_faiss import build_faiss_index
+
+from pipelines.tasks.build_faiss import build_faiss
 
 # Root of monthly cleaned data
 CLEAN_DIR = Path("data/clean")
@@ -38,7 +39,3 @@ def fetch_clean_month(year: str | None = None, month: str | None = None):
     logger.info("Fetching + cleaning PubMed data for %s-%s", y, m)
 
     run_pipeline(_month_query(y, m))
-
-@task(name="Build-FAISS", retries=1)
-def build_faiss():
-    build_faiss_index()
