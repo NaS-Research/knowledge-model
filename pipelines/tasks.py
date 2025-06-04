@@ -39,3 +39,8 @@ def fetch_clean_month(year: str | None = None, month: str | None = None):
     logger.info("Fetching + cleaning PubMed data for %s-%s", y, m)
 
     run_pipeline(_month_query(y, m))
+
+    jsonl_path = CLEAN_DIR / f"{y}" / f"{m}" / "chunks.jsonl"
+    # ensure the caller receives the path as a string
+    return str(jsonl_path)
+
