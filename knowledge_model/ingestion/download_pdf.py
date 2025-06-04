@@ -66,7 +66,10 @@ def download_pmc_pdf(pmcid: str, download_dir: str = "/tmp") -> str:
             r = _SESSION.get(url, stream=True, timeout=(5, 60))
             r.raise_for_status()
     
-            if "application/pdf" not in r.headers.get("Content-Type", ""):
+            ctype = r.headers.get("Content-Type", "")
+            if "application/pdf" not in ctype:
+                # Downgrade to INFO: many PMC entries legitimately have no PDF
+                logger.info("No PDF for %s (content‑type %s)", pmcid, ctype)
                 raise ValueError("Content-Type is not PDF")
     
             # Stream to disk in 1 MiB chunks

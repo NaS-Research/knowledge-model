@@ -1,0 +1,43 @@
+###
+### A complete description of a Prefect Deployment for flow 'continuous-nas'
+###
+name: dev-run
+description: null
+version: 7a3d0826388b109ef13923a73ff4af6d
+# The work queue that will handle this deployment's runs
+work_queue_name: default
+work_pool_name: null
+tags: []
+parameters: {}
+schedule: null
+schedules: []
+is_schedule_active: null
+infra_overrides: {}
+infrastructure:
+  type: process
+  env: {}
+  labels: {}
+  name: null
+  command: null
+  stream_output: true
+  working_dir: null
+  block_type_slug: process
+  _block_type_slug: process
+
+###
+### DO NOT EDIT BELOW THIS LINE
+###
+flow_name: continuous-nas
+manifest_path: null
+storage: null
+path: /Volumes/AGNDJ 6TB/NaS Models/knowledge-model
+entrypoint: pipelines/flows/continuous.py:continuous_nas
+parameter_openapi_schema:
+  title: Parameters
+  type: object
+  properties: {}
+  required: null
+  definitions: null
+timestamp: '2025-06-04T17:30:22.975058+00:00'
+triggers: []
+enforce_parameter_schema: null

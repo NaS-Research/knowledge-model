@@ -87,7 +87,13 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             tqdm(articles, desc="Processing", unit="article", **tqdm_kwargs), start=1
         ):
             pmid = art["pmid"]
-            pmcid = (art.get("pmcid") or "").replace("pmc-id:", "").split(";")[0].strip()
+            # Grab PMC ID (if present) — skip download when article is not in PMC
+            pmcid = (
+                art.get("pmcid", "")
+                    .replace("pmc-id:", "")
+                    .split(";")[0]
+                    .strip()
+            )
             doi = art.get("doi")
             pubdate = clean_text(art.get("pubdate") or "") or None
 
@@ -128,6 +134,9 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                     logger.info("Parsed %d chunks for PMCID %s", len(chunks), pmcid)
                 except Exception as err:
                     logger.warning("PDF failed for %s (%s): %s", pmid, pmcid, err)
+            else:
+                if not pmcid:
+                    logger.debug("PMID %s has no PMC entry — skipping PDF download", pmid)
 
             if not downloaded and raw_text:
                 chunks = chunk_text(raw_text, chunk_size)
