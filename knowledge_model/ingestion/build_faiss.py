@@ -28,6 +28,8 @@ from sentence_transformers import SentenceTransformer
 
 from knowledge_model.embeddings.vector_store import LocalFaiss
 
+__all__ = ["build_faiss_index"]
+
 # ───────────────────────────── configuration ────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +70,61 @@ def _encode_texts(
     return np.asarray(vecs, dtype=np.float32)
 
 
+# ───────────────────────────── public API ────────────────────────────────────
+def build_faiss_index(
+    jsonl: Path,
+    outdir: Path,
+    model_id: str = "all-MiniLM-L6-v2",
+    field: str = "text",
+) -> None:
+    """
+    Programmatic entry‑point for building a FAISS index.
+
+    Parameters
+    ----------
+    jsonl : Path
+        Path to a JSON‑Lines corpus.
+    outdir : Path
+        Output directory where the FAISS files + ``meta.json`` are written.
+    model_id : str, optional
+        Sentence‑BERT model to embed passages with.
+    field : str, optional
+        JSON key whose value is embedded (default ``"text"``).
+    """
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # -------- load & filter --------
+    logger.info("Loading %s …", jsonl)
+    texts: List[str] = []
+    meta: List[Dict[str, Any]] = []
+
+    for rec in _stream_records(jsonl):
+        passage = rec.get(field)
+        if passage:
+            texts.append(passage)
+            meta.append(rec)
+
+    if not texts:
+        raise ValueError(
+            f"No lines in {jsonl} contained a '{field}' field – cannot build index."
+        )
+    logger.info("Loaded %d passages (kept)", len(texts))
+
+    # -------- embed + write --------
+    vecs = _encode_texts(texts, model_id=model_id)
+
+    store = LocalFaiss(vecs.shape[1])
+    store.add(vecs, meta)
+    store.save(outdir)
+
+    logger.info(
+        "Index built → %s  |  dim=%d  |  rows=%d",
+        outdir,
+        vecs.shape[1],
+        vecs.shape[0],
+    )
+
+
 # ───────────────────────────── main ──────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build FAISS index + meta.json")
@@ -81,38 +138,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    args.outdir.mkdir(parents=True, exist_ok=True)
-
-    # -------- load & filter --------
-    logger.info("Loading %s …", args.jsonl)
-    texts: List[str] = []
-    meta: List[Dict[str, Any]] = []
-
-    for rec in _stream_records(args.jsonl):
-        passage = rec.get(args.field)
-        if passage:
-            texts.append(passage)
-            meta.append(rec)
-
-    if not texts:
-        raise ValueError(
-            f"No lines in {args.jsonl} contained a '{args.field}' field – "
-            "cannot build index."
-        )
-    logger.info("Loaded %d passages (kept)", len(texts))
-
-    # -------- embed + write --------
-    vecs = _encode_texts(texts, model_id=args.model)
-
-    store = LocalFaiss(vecs.shape[1])
-    store.add(vecs, meta)
-    store.save(args.outdir)
-
-    logger.info(
-        "Index built → %s  |  dim=%d  |  rows=%d",
-        args.outdir,
-        vecs.shape[1],
-        vecs.shape[0],
+    build_faiss_index(
+        jsonl=args.jsonl,
+        outdir=args.outdir,
+        model_id=args.model,
+        field=args.field,
     )
 
 
