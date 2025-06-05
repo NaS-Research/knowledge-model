@@ -22,7 +22,8 @@ tqdm_kwargs = {"mininterval": 1.0, "unit_scale": True}
 
 from knowledge_model.db.db_session import SessionLocal
 from knowledge_model.db.sql_models import Article, ArticleChunk
-from knowledge_model.ingestion.download_pdf import download_pmc_pdf
+import asyncio
+from knowledge_model.ingestion.pdf_async import fetch_pdfs_async
 from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract 
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
@@ -71,6 +72,21 @@ def _write_chunks(
 def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
     logger.info("Fetching articles for query: %s", query)
     articles = fetch_articles(query)
+    # ------------------------------------------------------------------
+    # Pre‑fetch PDFs for all articles that have a PMCID.  We run this once
+    # so downloads happen in parallel instead of one‑by‑one inside the loop.
+    # ------------------------------------------------------------------
+    pmcids = {
+        (art.get("pmcid") or "")
+        .replace("pmc-id:", "")
+        .split(";")[0]
+        .strip()
+        for art in articles
+        if art.get("pmcid")
+    }
+    logger.info("Downloading %d PDFs asynchronously …", len(pmcids))
+    pdf_map = asyncio.run(fetch_pdfs_async(list(pmcids)))
+
     logger.info("Fetched %d articles", len(articles))
 
     try:
@@ -109,34 +125,50 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             downloaded = False
             abstract_text = ""
 
-            if pmcid and not (existing and existing.pdf_downloaded):
-                stats["pmc"] += 1
-                try:
-                    pdf_path = download_pmc_pdf(pmcid)
-                    parsed = parse_pdf(pdf_path)
-
-                    try:
-                        abstract_text = clean_text(_efetch_abstract(pmid))
-                    except Exception:
-                        abstract_text = ""
-
-                    cleaned = clean_text(parsed["text"])
-                    chunks = chunk_text(cleaned, chunk_size)
-
-                    if abstract_text:
-                        chunks.insert(0, abstract_text)
-
-                    pdf_url = upload_dataset_to_s3(pdf_path)
-                    os.remove(pdf_path)
-                    downloaded = True
-                    stats["pdf"] += 1
-                    stats["chunks"] += len(chunks)
-                    logger.info("Parsed %d chunks for PMCID %s", len(chunks), pmcid)
-                except Exception as err:
-                    logger.warning("PDF failed for %s (%s): %s", pmid, pmcid, err)
+            # ------------------------------------------------------------------
+            # If we already received full‑text XML from EFetch (`section == "FULL"`),
+            # skip the PDF step entirely – the XML body is good enough.
+            # ------------------------------------------------------------------
+            if section_label == "FULL" and raw_text:
+                chunks = chunk_text(raw_text, chunk_size)
+                stats["chunks"] += len(chunks)
+                logger.debug(
+                    "Skipped PDF download for %s – full text already present in XML",
+                    pmid,
+                )
             else:
-                if not pmcid:
-                    logger.debug("PMID %s has no PMC entry — skipping PDF download", pmid)
+                pdf_path = None
+                if pmcid:
+                    pdf_path = pdf_map.get(pmcid)
+                    if pdf_path and not (existing and existing.pdf_downloaded):
+                        stats["pmc"] += 1
+                        try:
+                            parsed = parse_pdf(pdf_path)
+                            # abstract
+                            try:
+                                abstract_text = clean_text(_efetch_abstract(pmid))
+                            except Exception:
+                                abstract_text = ""
+
+                            cleaned = clean_text(parsed["text"])
+                            chunks = chunk_text(cleaned, chunk_size)
+
+                            if abstract_text:
+                                chunks.insert(0, abstract_text)
+
+                            pdf_url = upload_dataset_to_s3(pdf_path)
+                            os.remove(pdf_path)
+                            downloaded = True
+                            stats["pdf"] += 1
+                            stats["chunks"] += len(chunks)
+                            logger.info(
+                                "Parsed %d chunks for PMCID %s", len(chunks), pmcid
+                            )
+                        except Exception as err:
+                            logger.debug("PDF parse failed for %s: %s", pmcid, err)
+                else:
+                    if not pmcid:
+                        logger.debug("PMID %s has no PMC entry — skipping PDF download", pmid)
 
             if not downloaded and raw_text:
                 chunks = chunk_text(raw_text, chunk_size)

@@ -68,8 +68,8 @@ def download_pmc_pdf(pmcid: str, download_dir: str = "/tmp") -> str:
     
             ctype = r.headers.get("Content-Type", "")
             if "application/pdf" not in ctype:
-                # Downgrade to INFO: many PMC entries legitimately have no PDF
-                logger.info("No PDF for %s (content‑type %s)", pmcid, ctype)
+                # Downgrade to DEBUG: many PMC entries legitimately have no PDF
+                logger.debug("No PDF for %s (content‑type %s)", pmcid, ctype)
                 raise ValueError("Content-Type is not PDF")
     
             # Stream to disk in 1 MiB chunks
@@ -84,7 +84,7 @@ def download_pmc_pdf(pmcid: str, download_dir: str = "/tmp") -> str:
             return str(path)
     
         except Exception as exc:
-            logger.warning("Download failed: %s", exc)
+            logger.debug("Download failed: %s", exc)
             if attempt < MAX_RETRIES:
                 sleep(RETRY_BACKOFF * attempt)
             else:
