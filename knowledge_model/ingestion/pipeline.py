@@ -88,11 +88,11 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
         ):
             pmid = art["pmid"]
             # Grab PMC ID (if present) — skip download when article is not in PMC
+            pmcid_raw = art.get("pmcid") or ""
             pmcid = (
-                art.get("pmcid", "")
-                    .replace("pmc-id:", "")
-                    .split(";")[0]
-                    .strip()
+                pmcid_raw.replace("pmc-id:", "")
+                         .split(";")[0]
+                         .strip()
             )
             doi = art.get("doi")
             pubdate = clean_text(art.get("pubdate") or "") or None

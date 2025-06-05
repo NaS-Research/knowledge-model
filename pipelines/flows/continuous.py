@@ -10,7 +10,7 @@ def continuous_nas():
     logger.info("Starting end‑to‑end pipeline run")
 
     # 1) Fetch + clean next missing month, get JSONL path
-    clean_jsonl = fetch_clean_month().result()
+    clean_jsonl = fetch_clean_month.submit().result()
     logger.info("fetch_clean_month completed: %s", clean_jsonl)
 
     # 2) Determine outdir = data/index/YYYY/MM
@@ -18,10 +18,10 @@ def continuous_nas():
     outdir = Path("data/index") / clean_path.parent.parent.name / clean_path.parent.name
 
     # 3) Build FAISS for this month
-    build_faiss(jsonl=clean_jsonl, outdir=outdir)
+    build_faiss.submit(jsonl=clean_jsonl, outdir=outdir)
 
     # 4) Evaluate the new index
-    score = eval_snapshot().result()
+    score = eval_snapshot.submit().result()
     if score < 0.80:
         raise ValueError(f"Evaluation recall too low: {score:.3f}")
 
