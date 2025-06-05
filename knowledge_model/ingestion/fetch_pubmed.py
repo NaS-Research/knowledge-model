@@ -137,7 +137,7 @@ def _efetch_abstract(pmid: str, retries: int = 3, timeout: int = 60) -> str:
             break
         except (requests.Timeout, requests.exceptions.ReadTimeout, requests.HTTPError) as err:
             if attempt == retries:
-                logger.warning("EFetch timeout/HTTP error for PMID %s after %d tries — %s", pmid, retries, err)
+                logger.info("EFetch gave up on PMID %s after %d tries — %s", pmid, retries, err)
                 return ""
             logger.debug("EFetch retry %d/%d for PMID %s", attempt, retries, pmid)
             time.sleep(2 * attempt)
@@ -146,7 +146,7 @@ def _efetch_abstract(pmid: str, retries: int = 3, timeout: int = 60) -> str:
     try:
         root = ET.fromstring(r.text)
     except ET.ParseError:
-        logger.warning("EFetch XML parse error for PMID %s — empty abstract returned", pmid)
+        logger.info("EFetch XML parse error for PMID %s — empty abstract returned", pmid)
         return ""
 
     bits = [n.text or "" for n in root.findall(".//AbstractText")]
@@ -182,7 +182,7 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
                 requests.exceptions.ConnectionError,
                 requests.HTTPError) as err:
             if attempt == retries:
-                logger.warning("PMC fetch failed for %s after %d tries — %s", pmcid, retries, err)
+                logger.info("PMC fetch gave up on %s after %d tries — %s", pmcid, retries, err)
                 return ""
             logger.debug("PMC retry %d/%d for %s", attempt, retries, pmcid)
             time.sleep(2 * attempt)
@@ -192,7 +192,7 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
     try:
         root = ET.fromstring(r.text)
     except ET.ParseError:
-        logger.warning("PMC XML parse error for %s — returning empty text", pmcid)
+        logger.info("PMC XML parse error for %s — returning empty text", pmcid)
         return ""
 
     paras = [
