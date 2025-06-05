@@ -1,8 +1,10 @@
 accelerate
+aiolimiter>=1.0
 boto3
 datasets
 faiss-cpu==1.7.4
 fastapi
+httpx>=0.28
 numpy<2
 peft
 prefect==2.18.3
