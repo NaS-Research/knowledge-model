@@ -20,6 +20,7 @@ import os
 import time
 import xml.etree.ElementTree as ET
 from typing import Any, Iterable, List, Optional
+from math import ceil
 
 import requests
 from dotenv import load_dotenv
@@ -235,12 +236,17 @@ def fetch_articles(
 
     logger.info("Total PMIDs collected: %d", len(pmids))
 
+    total_batches = ceil(len(pmids) / summary_chunk_size)
+    logger.info("ESummary will run %d batch(es) of up to %d PMIDs each",
+                total_batches, summary_chunk_size)
+
     articles: list[dict[str, Any]] = []
     for batch in tqdm(
         _chunk(pmids, summary_chunk_size),
         desc="ESummary batches",
         unit="batch",
         colour="cyan",
+        total=total_batches,
     ):
         summary = _esummary(batch)
         for uid in summary.get("uids", []):
