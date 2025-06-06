@@ -26,6 +26,8 @@ from typing import Any, Iterable, List, Optional
 from math import ceil
 
 import requests
+from knowledge_model.ingestion.unpaywall import pdf_url_from_doi
+from knowledge_model.ingestion.download_pdf import download_pdf  # returns text or ""
 from dotenv import load_dotenv
 from tqdm.auto import tqdm
 
@@ -78,24 +80,26 @@ def _esearch(query: str, retstart: int) -> list[str]:
             r = requests.get(f"{EUTILS_BASE_URL}/esearch.fcgi", params=params, timeout=60)
             r.raise_for_status()
             return r.json().get("esearchresult", {}).get("idlist", [])
-        except (requests.Timeout, requests.exceptions.ReadTimeout) as err:
-            if attempt == 3:
-                logger.error("ESearch timeout after %d retries (retstart=%d) — %s", 3, retstart, err)
-                return []
-            logger.debug("ESearch retry %d/3 (retstart=%d)…", attempt, retstart)
-            # exponential back‑off with jitter: 0.5, 1.0, 2.0 …  (+0‑0.3s)
-            base = 0.5 * (2 ** (attempt - 1))
-            time.sleep(base + random.uniform(0.0, 0.3))
-        except requests.HTTPError as err:
-            status = err.response.status_code if err.response else "n/a"
-            if status in {500, 502, 503, 504} and attempt < 3:
-                logger.debug("ESearch HTTP %s retry %d/3 (retstart=%d)", status, attempt, retstart)
-                # exponential back‑off with jitter: 0.5, 1.0, 2.0 …  (+0‑0.3s)
+        except (requests.Timeout,
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.SSLError,
+                requests.HTTPError) as err:
+            if isinstance(err, requests.HTTPError):
+                status = err.response.status_code if err.response else "n/a"
+                if status in {500, 502, 503, 504} and attempt < 3:
+                    logger.debug("ESearch HTTP %s retry %d/3 (retstart=%d)", status, attempt, retstart)
+                    base = 0.5 * (2 ** (attempt - 1))
+                    time.sleep(base + random.uniform(0.0, 0.3))
+                else:
+                    logger.error("ESearch HTTP error %s (retstart=%d) — aborting page", status, retstart)
+                    return []
+            else:
+                if attempt == 3:
+                    logger.error("ESearch timeout after %d retries (retstart=%d) — %s", 3, retstart, err)
+                    return []
+                logger.debug("ESearch retry %d/3 (retstart=%d)…", attempt, retstart)
                 base = 0.5 * (2 ** (attempt - 1))
                 time.sleep(base + random.uniform(0.0, 0.3))
-            else:
-                logger.error("ESearch HTTP error %s (retstart=%d) — aborting page", status, retstart)
-                return []
     return []
 
 
@@ -124,12 +128,12 @@ def _esummary(pmids: list[str], retries: int = 3, timeout: int = 60) -> dict[str
         except (requests.Timeout,
                 requests.exceptions.ReadTimeout,
                 requests.exceptions.ConnectionError,
+                requests.exceptions.SSLError,
                 requests.HTTPError) as err:
             if attempt == retries:
                 logger.warning("ESummary failed for %d PMIDs after %d tries — %s", len(pmids), retries, err)
                 return {}
             logger.debug("ESummary retry %d/%d for %d PMIDs", attempt, retries, len(pmids))
-            # exponential back‑off with jitter: 0.5, 1.0, 2.0 …  (+0‑0.3s)
             base = 0.5 * (2 ** (attempt - 1))
             time.sleep(base + random.uniform(0.0, 0.3))
 
@@ -149,7 +153,10 @@ def _efetch_abstract(pmid: str, retries: int = 3, timeout: int = 60) -> str:
             r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout)
             r.raise_for_status()
             break
-        except (requests.Timeout, requests.exceptions.ReadTimeout, requests.HTTPError) as err:
+        except (requests.Timeout,
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.SSLError,
+                requests.HTTPError) as err:
             if attempt == retries:
                 logger.info("EFetch gave up on PMID %s after %d tries — %s", pmid, retries, err)
                 return ""
@@ -192,10 +199,11 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
         try:
             r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout)
             r.raise_for_status()
-            break
+            breaks
         except (requests.Timeout,
                 requests.exceptions.ReadTimeout,
                 requests.exceptions.ConnectionError,
+                requests.exceptions.SSLError,
                 requests.HTTPError) as err:
             if attempt == retries:
                 logger.info("PMC fetch gave up on %s after %d tries — %s", pmcid, retries, err)
@@ -221,19 +229,26 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
     return "\n\n".join(paras)
 
 
-# --------------------------------------------------------------------------- #
-# Parallel helper – fetch either FULL text (PMC) or ABSTRACT for one article
-# --------------------------------------------------------------------------- #
-def _get_body(pmid: str, pmcid: str | None) -> tuple[str, str]:
+def _get_body(pmid: str, pmcid: str | None, doi: str | None) -> tuple[str, str]:
     """
     Return (section, text_body) where section∈{"FULL","ABSTRACT","NONE"}.
     Runs the same logic the sequential loop used, but is suitable for threads.
     """
+    # 1️⃣  Try PMC full‑text first
     if pmcid:
         full_text = _efetch_pmc_fulltext(pmcid)
         if full_text:
             return "FULL", full_text
 
+    # 2️⃣  Try publisher PDF via Unpaywall
+    if doi:
+        pdf_url = pdf_url_from_doi(doi)
+        if pdf_url:
+            pdf_text = download_pdf(pdf_url)  # returns "" on failure
+            if pdf_text:
+                return "FULL", pdf_text
+
+    # 3️⃣  Fallback to abstract
     abstract = _efetch_abstract(pmid)
     if abstract:
         return "ABSTRACT", abstract
@@ -301,18 +316,19 @@ def fetch_articles(
                              .strip()
                     if raw_pmcid else None
                 )
+                doi = id_map.get("doi")
 
-                fut = pool.submit(_get_body, uid, pmcid)
-                futures[fut] = (uid, pmcid, id_map, entry)
+                fut = pool.submit(_get_body, uid, pmcid, doi)
+                futures[fut] = (uid, pmcid, doi, id_map, entry)
 
             for fut in as_completed(futures):
-                uid, pmcid, id_map, entry = futures[fut]
+                uid, pmcid, doi, id_map, entry = futures[fut]
                 section, text_body = fut.result()
                 articles.append(
                     {
                         "pmid": uid,
                         "pmcid": pmcid,
-                        "doi": id_map.get("doi"),
+                        "doi": doi,
                         "title": entry.get("title"),
                         "authors": [a["name"] for a in entry.get("authors", [])],
                         "journal": entry.get("fulljournalname"),
