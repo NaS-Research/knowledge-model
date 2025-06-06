@@ -20,6 +20,8 @@ import os
 import time
 import random
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from typing import Any, Iterable, List, Optional
 from math import ceil
 
@@ -38,6 +40,10 @@ if PUBMED_API_KEY:
     REQ_SLEEP_SEC = 0.11   # ≈10 requests per second
 else:
     REQ_SLEEP_SEC = 0.34   # ≈3 requests per second
+
+# Max threads used for parallel EFetch/PMC full‑text.  Tune conservatively to
+# stay inside NCBI’s 10 req/s with API key (3 req/s without).
+WORKER_THREADS = 8
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +221,26 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
     return "\n\n".join(paras)
 
 
+# --------------------------------------------------------------------------- #
+# Parallel helper – fetch either FULL text (PMC) or ABSTRACT for one article
+# --------------------------------------------------------------------------- #
+def _get_body(pmid: str, pmcid: str | None) -> tuple[str, str]:
+    """
+    Return (section, text_body) where section∈{"FULL","ABSTRACT","NONE"}.
+    Runs the same logic the sequential loop used, but is suitable for threads.
+    """
+    if pmcid:
+        full_text = _efetch_pmc_fulltext(pmcid)
+        if full_text:
+            return "FULL", full_text
+
+    abstract = _efetch_abstract(pmid)
+    if abstract:
+        return "ABSTRACT", abstract
+
+    return "NONE", ""
+
+
 def fetch_articles(
     query: str,
     *,
@@ -261,54 +287,40 @@ def fetch_articles(
         total=total_batches,
     ):
         summary = _esummary(batch)
-        for uid in summary.get("uids", []):
-            entry = summary.get(uid, {})
-            id_map = {d["idtype"]: d["value"] for d in entry.get("articleids", [])}
+        # ---------- build article dicts in parallel ------------------------------
+        with ThreadPoolExecutor(max_workers=WORKER_THREADS) as pool:
+            futures = {}
+            for uid in summary.get("uids", []):
+                entry = summary.get(uid, {})
+                id_map = {d["idtype"]: d["value"] for d in entry.get("articleids", [])}
 
-            raw_pmcid = id_map.get("pmcid")
-            pmcid = (
-                raw_pmcid.replace("pmc-id:", "")
-                         .split(";")[0]
-                         .strip()
-                if raw_pmcid else None
-            )
-            
-            full_text = ""
-            if pmcid:
-                try:
-                    full_text = _efetch_pmc_fulltext(pmcid)
-                except (requests.exceptions.RequestException, ET.ParseError) as err:
-                    logger.warning(
-                        "PMC fetch failed for %s after retries — %s; falling back to abstract",
-                        pmcid,
-                        err,
-                    )
+                raw_pmcid = id_map.get("pmcid")
+                pmcid = (
+                    raw_pmcid.replace("pmc-id:", "")
+                             .split(";")[0]
+                             .strip()
+                    if raw_pmcid else None
+                )
 
-            if full_text:
-                text_body = full_text
-                section = "FULL"
-            else:
-                try:
-                    text_body = _efetch_abstract(uid)
-                    section = "ABSTRACT"
-                except requests.HTTPError as err:
-                    logger.warning("EFetch failed for PMID %s — %s; skipping abstract", uid, err)
-                    text_body = ""
-                    section = "NONE"
+                fut = pool.submit(_get_body, uid, pmcid)
+                futures[fut] = (uid, pmcid, id_map, entry)
 
-            articles.append(
-                {
-                    "pmid": uid,
-                    "pmcid": pmcid,
-                    "doi": id_map.get("doi"),
-                    "title": entry.get("title"),
-                    "authors": [a["name"] for a in entry.get("authors", [])],
-                    "journal": entry.get("fulljournalname"),
-                    "pubdate": entry.get("pubdate"),
-                    "section": section,
-                    "text": text_body,
-                }
-            )
+            for fut in as_completed(futures):
+                uid, pmcid, id_map, entry = futures[fut]
+                section, text_body = fut.result()
+                articles.append(
+                    {
+                        "pmid": uid,
+                        "pmcid": pmcid,
+                        "doi": id_map.get("doi"),
+                        "title": entry.get("title"),
+                        "authors": [a["name"] for a in entry.get("authors", [])],
+                        "journal": entry.get("fulljournalname"),
+                        "pubdate": entry.get("pubdate"),
+                        "section": section,
+                        "text": text_body,
+                    }
+                )
 
         tqdm.write(f"  ↳ accumulated articles: {len(articles)}")
         if max_results and len(articles) >= max_results:
