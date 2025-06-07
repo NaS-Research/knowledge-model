@@ -199,7 +199,7 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
         try:
             r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout)
             r.raise_for_status()
-            breaks
+            break
         except (requests.Timeout,
                 requests.exceptions.ReadTimeout,
                 requests.exceptions.ConnectionError,

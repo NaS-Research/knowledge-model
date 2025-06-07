@@ -50,6 +50,27 @@ def _stream_records(path: Path) -> Iterable[Dict[str, Any]]:
                 logger.warning("Skipping malformed JSON line")
                 continue
 
+# ---------------------------------------------------------------------
+# Stream utility that accepts *either* a single file or a directory
+# ---------------------------------------------------------------------
+def _iter_jsonl(src: Path) -> Iterable[Dict[str, Any]]:
+    """
+    Yield JSON objects from *src*, which may be:
+      • a single ``*.jsonl`` file, or
+      • a directory – we will stream **all** ``*.jsonl`` files found
+        recursively inside it.
+
+    This keeps memory usage constant while allowing per‑article files.
+    """
+    if src.is_dir():
+        files = sorted(src.rglob("*.jsonl"))
+        if not files:
+            logger.warning("No .jsonl files found under %s", src)
+        for file in files:
+            yield from _stream_records(file)
+    else:
+        yield from _stream_records(src)
+
 
 def _encode_texts(
     texts: List[str],
@@ -98,7 +119,7 @@ def build_faiss_index(
     texts: List[str] = []
     meta: List[Dict[str, Any]] = []
 
-    for rec in _stream_records(jsonl):
+    for rec in _iter_jsonl(jsonl):
         passage = rec.get(field)
         if passage:
             texts.append(passage)

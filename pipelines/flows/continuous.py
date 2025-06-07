@@ -15,10 +15,9 @@ def continuous_nas():
 
     # 2) Determine outdir = data/index/YYYY/MM
     clean_path = Path(clean_jsonl)
-    outdir = Path("data/index") / clean_path.parent.parent.name / clean_path.parent.name
 
     # 3) Build FAISS for this month
-    build_faiss.submit(jsonl=clean_jsonl, outdir=outdir)
+    build_faiss.submit(src_dir=clean_path.parent)
 
     # 4) Evaluate the new index
     score = eval_snapshot.submit().result()

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
-import json
+from knowledge_model.ingestion import json
 import logging
 import os
 import re
@@ -54,19 +54,33 @@ def _write_chunks(
     year: str,
     month: str,
 ) -> None:
+    """
+    Write every *chunk* to (a) the global training file and (b) a
+    per‑article file under data/clean/YYYY/MM/.
+
+    We open each target file **once** with a 4 MiB buffer to avoid the
+    thousands of open/close syscalls that were previously killing
+    throughput.
+    """
     month_dir = CLEAN_ROOT / year / month
     month_dir.mkdir(parents=True, exist_ok=True)
+
     base = f"{pmid}_{art_id}"
     if any(p.name.startswith(base) for p in month_dir.glob("*.jsonl")):
         logger.info("Skip duplicate chunk write for %s", base)
         return
-    with TRAIN_FILE.open("a", encoding="utf-8") as train_f, \
-            (month_dir / f"{base}.jsonl").open("a", encoding="utf-8") as clean_f:
+
+    buffer_size = 4 * 1024 * 1024  # 4 MiB OS‑level buffer
+    train_path = TRAIN_FILE
+    article_path = month_dir / f"{base}.jsonl"
+
+    with train_path.open("ab", buffering=buffer_size) as train_fh, \
+         article_path.open("ab", buffering=buffer_size) as art_fh:
         for text in chunks:
-            rec = {"pmid": pmid, "title": title, "text": text}
-            line = json.dumps(rec, ensure_ascii=False) + "\n"
-            train_f.write(line)
-            clean_f.write(line)
+            record = {"pmid": pmid, "title": title, "text": text}
+            line: bytes = json.dumps(record) + b"\n"  # orjson -> bytes
+            train_fh.write(line)
+            art_fh.write(line)
 
 
 def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
