@@ -108,4 +108,12 @@ def download_pmc_pdf(pmcid: str, download_dir: str | Path = "/tmp", retries: int
     return None
 
 
-__all__ = ["download_pmc_pdf"]
+
+def download_pdf(pmcid: str, download_dir: str | Path = "/tmp", retries: int = 3) -> str | None:
+    """
+    Back‑compat wrapper: older pipeline code expects `download_pdf`, which is
+    now renamed to `download_pmc_pdf`.  Delegates directly.
+    """
+    return download_pmc_pdf(pmcid, download_dir=download_dir, retries=retries)
+
+__all__ = ["download_pmc_pdf", "download_pdf"]

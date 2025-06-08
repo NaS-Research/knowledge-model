@@ -3,16 +3,22 @@
 ###
 name: dev-run
 description: null
-version: 7a3d0826388b109ef13923a73ff4af6d
+version: c24f180684643bf523fec23fc50f1bae
 # The work queue that will handle this deployment's runs
 work_queue_name: default
-work_pool_name: null
+work_pool_name: default-agent-pool
 tags: []
 parameters: {}
 schedule: null
 schedules: []
 is_schedule_active: null
 infra_overrides: {}
+
+###
+### DO NOT EDIT BELOW THIS LINE
+###
+flow_name: continuous-nas
+manifest_path: null
 infrastructure:
   type: process
   env: {}
@@ -21,14 +27,11 @@ infrastructure:
   command: null
   stream_output: true
   working_dir: null
+  _block_document_id: 6c4768fe-a8fc-4576-ba3d-f7d795b6be77
+  _block_document_name: anonymous-1772ae80-9257-4066-af18-141dbf7bd818
+  _is_anonymous: true
   block_type_slug: process
   _block_type_slug: process
-
-###
-### DO NOT EDIT BELOW THIS LINE
-###
-flow_name: continuous-nas
-manifest_path: null
 storage: null
 path: /Volumes/AGNDJ 6TB/NaS Models/knowledge-model
 entrypoint: pipelines/flows/continuous.py:continuous_nas
@@ -38,6 +41,6 @@ parameter_openapi_schema:
   properties: {}
   required: null
   definitions: null
-timestamp: '2025-06-04T17:30:22.975058+00:00'
+timestamp: '2025-06-07T20:47:17.091891+00:00'
 triggers: []
 enforce_parameter_schema: null

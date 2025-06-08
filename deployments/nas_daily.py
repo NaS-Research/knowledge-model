@@ -11,6 +11,12 @@ update the deployment with Prefect.  It will:
 from prefect.deployments import Deployment
 from prefect.server.schemas.schedules import CronSchedule
 from pipelines.flows.continuous import continuous_nas
+from pathlib import Path
+from prefect.infrastructure import Process
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+infra = Process(working_dir=str(ROOT_DIR), concurrency_limit=1)
 
 if __name__ == "__main__":
     Deployment.build_from_flow(
@@ -22,5 +28,5 @@ if __name__ == "__main__":
             timezone="America/Chicago",
         ),
         tags=["daily"],
-        infra_overrides={"concurrency_limit": 1},  # never overlap runs
+        infrastructure=infra,
     ).apply()

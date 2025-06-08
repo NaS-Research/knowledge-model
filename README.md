@@ -12,6 +12,7 @@ The NaS Knowledge Model is a modular Retrieval-Augmented Generation (RAG) system
 - Vector indexing using FAISS and SentenceTransformers
 - Monthly LoRA-based fine-tuning of TinyLlama-1.1B on Apple Silicon
 - Automated S3 uploads for all training batches and model adapters
+- Prefect‑orchestrated end‑to‑end pipeline with daily autonomous runs (agent/worker)
 
 ---
 
@@ -19,16 +20,20 @@ The NaS Knowledge Model is a modular Retrieval-Augmented Generation (RAG) system
 
 ```
 knowledge-model/
+├── api/                       # FastAPI RAG endpoint
 ├── adapters/                  # LoRA adapters per training batch
 ├── data/
-│   ├── clean/YYYY/MM/        # Chunked, cleaned article text
-│   └── science_articles/     # JSONL training files (YYYY-MM.jsonl)
-├── embeddings/               # Faiss index builder and retriever
-├── ingestion/                # PDF parsing, PubMed fetching, S3 upload
-├── processing/               # Text cleaning and chunking pipeline
-├── training/                 # Fine-tuning with PEFT/LoRA
-├── api/                      # FastAPI RAG endpoint
-├── tests/                    # Unit tests for embeddings and backend
+│   ├── clean/YYYY/MM/         # Chunked, cleaned article text
+│   └── index/YYYY/MM/         # FAISS index shards
+├── deployments/               # Prefect deployment wrappers
+├── ingestion/                 # PubMed + PDF fetching (parallel / back‑off)
+├── pipelines/
+│   ├── flows/                 # Prefect flow definitions
+│   ├── tasks/                 # Task wrappers (fetch, build_faiss, eval)
+│   └── utils/                 # Time helpers etc.
+├── processing/                # Text cleaning and chunking pipeline
+├── training/                  # Fine‑tuning with PEFT/LoRA
+├── tests/                     # Unit tests and eval query set
 └── README.md
 ```
 
@@ -41,7 +46,24 @@ knowledge-model/
 - Auto-trims context for token limits, returns answer with cited sources
 - Hosted locally via FastAPI or deployable to cloud
 
+All retrieval uses the newest FAISS index automatically selected by the pipeline.
+
 ---
+
+## Pipeline & Automation
+
+The entire workflow is orchestrated by Prefect:
+
+1. **Fetch‑Clean‑Month** – parallel EFetch + PMC XML with intelligent back‑off,
+   tier‑ed PDF download (PMC → redirect PDF), and XML‑to‑text conversion.
+2. **Build‑FAISS** – embeds cleaned chunks with _all‑MiniLM‑L6‑v2_ and
+   writes `faiss.index` + `meta.npy`.
+3. **Eval‑Snapshot** – fixed recall@10 check; flow fails if score < 0.80.
+4. **Finetune‑LoRA** – (coming) trains TinyLlama adapters on new month.
+
+A daily deployment (`pipelines/flows/continuous.py`) is scheduled at 03:00
+local time via Prefect CRON and picked up by a `prefect worker` polling the
+_default_ queue.
 
 ## Model & Training Pipeline
 
@@ -62,6 +84,9 @@ knowledge-model/
 - PyMuPDF (PDF parsing)
 - PubMed E-Utilities (article ingestion)
 - AWS S3 (storage backend)
+- Prefect 2.x (orchestration)
+- BeautifulSoup4 + lxml (PDF link discovery)
+- tqdm / concurrent.futures (parallel ingestion)
 
 ---
 

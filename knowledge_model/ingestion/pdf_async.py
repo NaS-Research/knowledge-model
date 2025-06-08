@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
+from httpx import RemoteProtocolError
 from aiolimiter import AsyncLimiter
 
 # --------------------------------------------------------------------------- #
@@ -74,14 +75,18 @@ async def _request_pdf(url: str, client: httpx.AsyncClient, attempt: int) -> byt
         await asyncio.sleep(base + random.uniform(0.0, 0.3))
 
     # HEAD first – cheap reject on HTML
-    head = await client.head(url, follow_redirects=True)
-    ctype = head.headers.get("Content-Type", "")
-    if "application/pdf" not in ctype.lower():
-        return None
+    try:
+        head = await client.head(url, follow_redirects=True)
+        ctype = head.headers.get("Content-Type", "")
+        if "application/pdf" not in ctype.lower():
+            return None
 
-    resp = await client.get(url, follow_redirects=True, timeout=60)
-    resp.raise_for_status()
-    return resp.content
+        resp = await client.get(url, follow_redirects=True, timeout=60)
+        resp.raise_for_status()
+        return resp.content
+    except (RemoteProtocolError, httpx.TimeoutException) as exc:
+        # bubble up so caller can retry
+        raise exc
 
 
 async def _fetch_single_pmc(
@@ -105,7 +110,7 @@ async def _fetch_single_pmc(
                     out_path.write_bytes(data)
                     logger.debug("Downloaded PDF for %s (%d bytes)", pmcid, len(data))
                     return out_path
-                except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
+                except (httpx.HTTPStatusError, httpx.TimeoutException, RemoteProtocolError) as exc:
                     # Retry on HTTP 5xx or timeout
                     if (
                         isinstance(exc, httpx.HTTPStatusError)
