@@ -1,4 +1,3 @@
-
 """
 pipelines.tasks.fetch_clean
 ===========================
@@ -28,13 +27,11 @@ from prefect import task, get_run_logger
 from knowledge_model.ingestion.pipeline import run_pipeline, _month_query
 from datetime import date
 
- # Root where cleaned text is written by the ingestion pipeline
-CLEAN_DIR = Path("data/clean")
+from knowledge_model.config.settings import DATA_ROOT
+
+CLEAN_DIR = DATA_ROOT / "clean"
 
 
-# --------------------------------------------------------------------------- #
-# Helper: detect first missing YYYY/MM                                        #
-# --------------------------------------------------------------------------- #
 def _first_missing_month() -> tuple[str, str]:
     """
     Return (YYYY, MM) for the earliest month that has not yet been ingested.
@@ -56,15 +53,11 @@ def _first_missing_month() -> tuple[str, str]:
     raise RuntimeError("All months up to the present have been processed.")
 
 
-
 def _ensure_dir(path: Path) -> None:
     """Create *path* (and parents) if it doesn't already exist."""
     path.mkdir(parents=True, exist_ok=True)
 
 
-# --------------------------------------------------------------------------- #
-# Prefect task
-# --------------------------------------------------------------------------- #
 @task(retries=0, log_prints=True, name="Fetch-Clean-Month")
 def fetch_clean_month(year: str | None = None, month: str | None = None) -> str:
     """
@@ -74,27 +67,23 @@ def fetch_clean_month(year: str | None = None, month: str | None = None) -> str:
     ----------
     year, month : Optional[str]
         If both provided, ingest that specific month; otherwise automatically
-        detect the first missing YYYY/MM under ``data/clean/``.
+        detect the first missing YYYY/MM under data/clean/.
 
     Returns
     -------
     str
-        Path to the cleaned ``chunks.jsonl`` file for the ingested month.
+        Path to the cleaned chunks.jsonl file for the ingested month.
     """
     logger = get_run_logger()
 
-    # Decide which month to process
     y, m = (year, month) if year and month else _first_missing_month()
     logger.info("Ingesting PubMed data for %s-%s", y, m)
 
-    # Ensure output directory exists before ingestion writes files
     month_dir: Path = CLEAN_DIR / y / m
     _ensure_dir(month_dir)
 
-    # Run the ingestion pipeline (ESearch → EFetch → PDF → clean → chunk)
     run_pipeline(_month_query(y, m))
 
-    # Path expected by downstream tasks
     jsonl_path = month_dir / "chunks.jsonl"
     logger.info("Finished ingestion for %s-%s → %s", y, m, jsonl_path)
 

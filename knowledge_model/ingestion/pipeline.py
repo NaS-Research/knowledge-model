@@ -32,8 +32,12 @@ from knowledge_model.processing.text_cleaner import clean_text, chunk_text
 logger = logging.getLogger(__name__)
 
 
-TRAIN_FILE = Path("data/science_articles/NaS.jsonl")
-CLEAN_ROOT = Path("data/clean")
+
+# ――― Centralised data location ―――
+from knowledge_model.config.settings import DATA_ROOT
+
+TRAIN_FILE = DATA_ROOT / "science_articles" / "NaS.jsonl"
+CLEAN_ROOT = DATA_ROOT / "clean"
 TRAIN_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 

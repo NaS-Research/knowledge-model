@@ -26,10 +26,37 @@ from typing import Any, Iterable, List, Optional
 from math import ceil
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 from knowledge_model.ingestion.unpaywall import pdf_url_from_doi
 from knowledge_model.ingestion.download_pdf import download_pdf  # returns text or ""
 from dotenv import load_dotenv
 from tqdm.auto import tqdm
+
+# --------------------------------------------------------------------------------------
+# Shared `requests` Session with automatic retry on dropped/chunked connections
+# --------------------------------------------------------------------------------------
+_SESSION: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """Return a process‑wide Session configured with robust retries."""
+    global _SESSION
+    if _SESSION is not None:  # reuse between threads
+        return _SESSION
+
+    s = requests.Session()
+    retry = Retry(
+        total=5,                 # 1 original + 4 retries
+        backoff_factor=1.0,      # 1 s, 2 s, 4 s …
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    _SESSION = s
+    return s
 
 load_dotenv()
 
@@ -122,7 +149,7 @@ def _esummary(pmids: list[str], retries: int = 3, timeout: int = 60) -> dict[str
 
     for attempt in range(1, retries + 1):
         try:
-            r = requests.get(f"{EUTILS_BASE_URL}/esummary.fcgi", params=params, timeout=timeout)
+            r = _get_session().get(f"{EUTILS_BASE_URL}/esummary.fcgi", params=params, timeout=timeout, stream=False)
             r.raise_for_status()
             break
         except (requests.Timeout,
@@ -150,7 +177,7 @@ def _efetch_abstract(pmid: str, retries: int = 3, timeout: int = 60) -> str:
     params = {"db": "pubmed", "id": pmid, "retmode": "xml", "api_key": PUBMED_API_KEY}
     for attempt in range(1, retries + 1):
         try:
-            r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout)
+            r = _get_session().get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout, stream=False)
             r.raise_for_status()
             break
         except (requests.Timeout,
@@ -197,7 +224,7 @@ def _efetch_pmc_fulltext(pmcid: str, retries: int = 3, timeout: int = 60) -> str
 
     for attempt in range(1, retries + 1):
         try:
-            r = requests.get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout)
+            r = _get_session().get(f"{EUTILS_BASE_URL}/efetch.fcgi", params=params, timeout=timeout, stream=False)
             r.raise_for_status()
             break
         except (requests.Timeout,

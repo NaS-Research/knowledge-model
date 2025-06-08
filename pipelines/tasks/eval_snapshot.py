@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from knowledge_model.config.settings import settings
 from typing import List, Tuple
 
 import faiss
@@ -38,8 +39,8 @@ from sentence_transformers import SentenceTransformer
 # --------------------------------------------------------------------------------------
 # Configuration
 # --------------------------------------------------------------------------------------
-INDEX_ROOT = Path("data/index")               # where YYYY/MM/ directories live
-EVAL_PATH = Path("tests/eval_queries.jsonl")  # fixed evaluation set
+INDEX_ROOT = settings.DATA_DIR / "index"  # where YYYY/MM/ directories live
+EVAL_PATH = settings.REPO_ROOT / "tests" / "eval_queries.jsonl"  # fixed evaluation set
 K = 10                                        # recall@K
 
 
