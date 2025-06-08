@@ -75,6 +75,7 @@ else:
 WORKER_THREADS = 8
 
 logger = logging.getLogger(__name__)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 
 def _chunk(iterable: Iterable[str], size: int) -> Iterable[List[str]]:

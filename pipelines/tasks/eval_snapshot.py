@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from knowledge_model.config.settings import settings
+from knowledge_model.config.settings import DATA_ROOT
 from typing import List, Tuple
 
 import faiss
@@ -39,9 +39,9 @@ from sentence_transformers import SentenceTransformer
 # --------------------------------------------------------------------------------------
 # Configuration
 # --------------------------------------------------------------------------------------
-INDEX_ROOT = settings.DATA_DIR / "index"  # where YYYY/MM/ directories live
-EVAL_PATH = settings.REPO_ROOT / "tests" / "eval_queries.jsonl"  # fixed evaluation set
-K = 10                                        # recall@K
+INDEX_ROOT = DATA_ROOT / "index"
+EVAL_PATH  = DATA_ROOT.parent / "tests" / "eval_queries.jsonl"
+K = 10
 
 
 # --------------------------------------------------------------------------------------
@@ -96,9 +96,7 @@ def eval_snapshot() -> float:
     for query, expected_pmid in eval_rows:
         vec = model.encode([query]).astype(np.float32)
         _, indices = index.search(vec, K)
-        retrieved = [
-            meta[i]["pmid"] for i in indices[0] if i != -1
-        ]  # guard against padding -1
+        retrieved = [meta[i]["pmid"] for i in indices[0] if i != -1]
         if expected_pmid in retrieved:
             hits += 1
 
