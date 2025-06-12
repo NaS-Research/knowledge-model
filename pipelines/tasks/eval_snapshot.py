@@ -1,5 +1,3 @@
-
-
 """
 Task: eval_snapshot
 -------------------
@@ -36,10 +34,7 @@ import numpy as np
 from prefect import task, get_run_logger
 from sentence_transformers import SentenceTransformer
 
-# --------------------------------------------------------------------------------------
-# Configuration
-# --------------------------------------------------------------------------------------
-INDEX_ROOT = DATA_ROOT / "index"
+DEFAULT_INDEX_ROOT = DATA_ROOT / "index"
 EVAL_PATH  = DATA_ROOT.parent / "tests" / "eval_queries.jsonl"
 K = 10
 
@@ -47,15 +42,16 @@ K = 10
 # --------------------------------------------------------------------------------------
 # Helper utilities
 # --------------------------------------------------------------------------------------
-def _latest_index_dir() -> Path:
+def _latest_index_dir(idx_root: Path) -> Path:
     """
-    Return the directory of the most recent FAISS index under INDEX_ROOT.
+    Return the directory of the most recent FAISS index under *idx_root*.
 
-    Assumes the structure data/index/YYYY/MM/faiss.index
+    Assumes the structure idx_root/YYYY/MM/faiss.index
     """
-    index_files = sorted(INDEX_ROOT.glob("*/**/faiss.index"))
+    # walk recursively; handles YYYY/MM/ or deeper nests
+    index_files = sorted(idx_root.rglob("faiss.index"))
     if not index_files:
-        raise RuntimeError(f"No FAISS indexes found under {INDEX_ROOT}")
+        raise RuntimeError(f"No FAISS indexes found under {idx_root}")
     return index_files[-1].parent
 
 
@@ -76,14 +72,15 @@ def _load_eval_set() -> List[Tuple[str, str]]:
 # Prefect task
 # --------------------------------------------------------------------------------------
 @task
-def eval_snapshot() -> float:
+def eval_snapshot(idx_root: str | Path | None = None) -> float:
     """
-    Run the fixed evaluation set against the newest index and return recall@10.
+    Run the fixed evaluation set against the newest index inside *idx_root*
+    (defaults to DATA_ROOT/index) and return recall@10.
     """
     logger = get_run_logger()
 
-    # Locate resources ----------------------------------------------------------
-    idx_dir = _latest_index_dir()
+    idx_root_path = Path(idx_root) if idx_root else DEFAULT_INDEX_ROOT
+    idx_dir = _latest_index_dir(idx_root_path)
     logger.info("Evaluating index in %s", idx_dir)
 
     index = faiss.read_index(str(idx_dir / "faiss.index"))

@@ -1,5 +1,5 @@
 """
-High-level, cached accessors for TinyLlama + LoRA adapter used during local inference.
+High-level, cached accessors for TxGemma models used during local inference.
 
 Example:
     >>> from inference.model import generate, stream
@@ -63,7 +63,7 @@ def _get_tokenizer() -> AutoTokenizer:
 
 def _get_model() -> torch.nn.Module:
     """
-    Lazily loads the base TinyLlama model, applies the LoRA adapter, and 
+    Lazily loads the base TxGemma model, applies the LoRA adapter, and 
     moves it to the specified device.
     
     Returns:
@@ -92,6 +92,7 @@ def _get_model() -> torch.nn.Module:
             model.eval()
             _model = model
 
+            # Lazily loads the base TxGemma model …
             LOGGER.info(
                 "Model + adapter loaded in %.1fs on **%s**",
                 time.time() - t0,
@@ -105,7 +106,8 @@ def _get_model() -> torch.nn.Module:
 
 def _prepare_prompt(user_prompt: str) -> str:
     """
-    Constructs a conversation prompt in the TinyLlama‑Chat format.
+    Constructs a conversation prompt in the Gemma‑chat format expected by
+    TxGemma.  TxGemma follows the <start_of_turn>/<end_of_turn> convention.
 
     Args:
         user_prompt (str): The user's input prompt.
@@ -114,9 +116,9 @@ def _prepare_prompt(user_prompt: str) -> str:
         str: The formatted prompt for the model.
     """
     return (
-        f"<|system|>{Config.SYSTEM_PROMPT}</s>"
-        f"<|user|>{user_prompt.strip()}</s>"
-        f"<|assistant|>"
+        f"<start_of_turn>system\n{Config.SYSTEM_PROMPT}<end_of_turn>\n"
+        f"<start_of_turn>user\n{user_prompt.strip()}<end_of_turn>\n"
+        f"<start_of_turn>model\n"
     )
 
 

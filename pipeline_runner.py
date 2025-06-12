@@ -4,13 +4,13 @@ pipeline_runner.py
 Single‑shot orchestration script.
 
 Workflow
-1. Ingest one month of PubMed articles (default **February 2013**).
+1. Ingest one month of PubMed articles (default **January 2013**).
 2. Merge the updated raw corpus with instruction pairs (≈80 / 20).
-3. Fine‑tune TinyLlama with a LoRA adapter on the mixed corpus.
+3. Fine‑tune TxGemma‑2B with a LoRA adapter on the mixed corpus.
 
 Run
 ----
-python pipeline_runner.py          # uses default 2013‑02
+python pipeline_runner.py          # uses default 2013‑01
 python pipeline_runner.py --year 2020 --month 06
 """
 
@@ -28,11 +28,11 @@ log = logging.getLogger("pipeline_runner")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run ingest → merge → fine‑tune cycle")
     p.add_argument("--year", default="2013", help="YYYY (default 2013)")
-    p.add_argument("--month", default="02", help="MM (default 02 = Feb)")
+    p.add_argument("--month", default="01", help="MM (default 01 = Jan)")
     p.add_argument("--raw_corpus", default="data/science_articles/NaS.jsonl")
     p.add_argument("--instr_file", default="data/instructions/instruction_pairs.jsonl")
     p.add_argument("--mixed_out", default="data/combined/combined_v2.jsonl")
-    p.add_argument("--adapter_out", default="adapters/nicole-v2")
+    p.add_argument("--adapter_out", default="adapters/txgemma-2b")
     return p.parse_args()
 
 
@@ -61,7 +61,7 @@ def main() -> None:
     subprocess.run(
         [
             "accelerate", "launch", "training/train_lora.py",
-            "--model_name_or_path", "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            "--model_name_or_path", "google/txgemma-2b-predict",
             "--train_file", args.mixed_out,
             "--output_dir", args.adapter_out,
             "--num_train_epochs", "2",

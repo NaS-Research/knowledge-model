@@ -46,6 +46,9 @@ htmlcov/
 
 # === Project-specific (large artifacts and data) ===
 /data/
+# Keep version control of helper scripts under data/tools
+!/data/tools/
+!/data/tools/**
 *.jsonl
 adapters/
 training/output/

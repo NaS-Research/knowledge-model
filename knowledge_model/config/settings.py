@@ -7,9 +7,16 @@ This module is intentionally tiny and dependency‑free.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DATA_ROOT: Path = _PROJECT_ROOT / "data"
 
-__all__ = ["DATA_ROOT"]
+# Ensure the data root exists
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Minimal settings object expected by other modules
+settings = SimpleNamespace(DATA_ROOT=DATA_ROOT)
+
+__all__ = ["DATA_ROOT", "settings"]

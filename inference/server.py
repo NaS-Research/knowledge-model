@@ -2,7 +2,7 @@
 inference.server
 ================
 
-A **tiny FastAPI service** that exposes the fine‑tuned TinyLlama as a REST API.
+A **tiny FastAPI service** that exposes the fine‑tuned TxGemma as a REST API.
 
 Endpoints
 ---------
@@ -31,7 +31,7 @@ from inference.postprocess import clean_output
 logger = logging.getLogger(__name__)
 settings = Settings()
 
-logger.info("Loading model + adapter …")
+logger.info("Loading TxGemma model …")
 tokenizer, lm = load_model(
     adapter_path=settings.adapter_path,
     device=settings.device,
@@ -39,7 +39,7 @@ tokenizer, lm = load_model(
 logger.info("Model ready ✓")
 
 app = FastAPI(
-    title="NaS TinyLlama Inference",
+    title="NaS TxGemma Inference",
     version="0.1.0",
     docs_url="/",
 )

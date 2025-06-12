@@ -49,9 +49,11 @@ REF_SECTION_RE = re.compile(r"\n(?:references|bibliography)\b", re.I)
 AUTHOR_YEAR_RE = re.compile(r"\([A-Z][A-Za-z]*(?: et al\.)?,?\s?\d{4}[a-z]?\)", re.I)
 FIG_CAPTION_RE = re.compile(r"^\s*(Figure|Table)\s+\d+[^.\n]*\n?", re.I | re.M)
 UNWANTED_SECTIONS_RE = re.compile(
-    r"\n(?:methods?|acknowledg(?:e)?ments?|funding|conflicts? of interest)\b", re.I
+    r"\n\s*(?:methods?|acknowledg(?:e)?ments?|funding|conflicts? of interest)\b",
+    re.I,
 )
-HYPHEN_BREAK_RE = re.compile(r"(\w+)-\s+(\w+)")
+# Remove hyphen + *line break* that was inserted by PDF wrapping, but keep real hyphenated terms.
+HYPHEN_BREAK_RE = re.compile(r"(\w+)-\s*\n\s*(\w+)")
 WHITESPACE_RE = re.compile(r"\s+")
 DEFAULT_CHUNK_SIZE = 1_000
 
@@ -136,9 +138,13 @@ def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[str]:
             chunks.append(" ".join(current))
         return chunks
     else:
+        logger.warning(
+            "NLTK Punkt sentence tokenizer not available; "
+            "falling back to fixed‑word window chunking."
+        )
         # fallback: simple word window
         words = text.split()
-        return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+        return [" ".join(words[i : i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
 
 def process_jsonl(src_file: str = "data/science_articles/train.jsonl", out_dir: str = "data/clean") -> None:
@@ -179,9 +185,25 @@ def process_jsonl(src_file: str = "data/science_articles/train.jsonl", out_dir: 
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s: %(message)s",
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Clean and chunk a JSONL corpus for downstream RAG."
     )
-    process_jsonl()
-    logger.info("Cleaned chunks written to data/clean/")
+    parser.add_argument(
+        "--src_file",
+        "-i",
+        default="data/science_articles/train.jsonl",
+        help="Source JSONL file to clean (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out_dir",
+        "-o",
+        default="data/clean",
+        help="Output directory for cleaned chunks (default: %(default)s)",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    process_jsonl(src_file=args.src_file, out_dir=args.out_dir)
+    logger.info("Cleaned chunks written to %s", args.out_dir)

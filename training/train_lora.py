@@ -6,15 +6,16 @@ Lightweight CLI for fine‑tuning a causal‑LM with Low‑Rank Adaptation (LoRA
 Example
 -------
 accelerate launch training/train_lora.py \
-  --model_name_or_path TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
-  --train_file data/combined/combined_v2.jsonl \
-  --output_dir adapters/nicole-v2 \
+  --model_name_or_path google/txgemma-2b-predict \
+  --train_file data/lora/combined/combined.jsonl \
+  --output_dir adapters/txgemma_lora_v1 \
   --num_train_epochs 2 \
   --per_device_train_batch_size 4 \
   --gradient_accumulation_steps 4 \
-  --learning_rate 1e-4 \
-  --lora_r 16 --lora_alpha 32 \
-  --lora_target_modules q_proj v_proj k_proj o_proj \
+  --learning_rate 2e-4 \
+  --load_in_4bit \
+  --lora_r 8 --lora_alpha 16 \
+  --lora_target_modules q_proj k_proj v_proj o_proj gate_proj up_proj down_proj \
   --max_seq_length 1536
 """
 
@@ -37,6 +38,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers import BitsAndBytesConfig
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("train_lora")
@@ -44,8 +46,12 @@ logger = logging.getLogger("train_lora")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LoRA fine‑tune for causal‑LMs")
-    p.add_argument("--model_name_or_path", required=True)
-    p.add_argument("--train_file", required=True)
+    p.add_argument("--model_name_or_path", default="google/txgemma-2b-predict")
+    p.add_argument(
+        "--train_file",
+        default="data/lora/combined/combined.jsonl",
+        help="Path to the training JSONL file (default: %(default)s)",
+    )
     p.add_argument("--output_dir", required=True)
     p.add_argument("--num_train_epochs", type=float, default=1)
     p.add_argument("--per_device_train_batch_size", type=int, default=1)
@@ -54,11 +60,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_seq_length", type=int, default=512)
 
     # LoRA params
-    p.add_argument("--lora_r", type=int, default=16)
+    p.add_argument("--lora_r", type=int, default=8)
     p.add_argument("--lora_alpha", type=int, default=32)
     p.add_argument("--lora_dropout", type=float, default=0.05)
-    p.add_argument("--lora_target_modules", nargs="+", default=["q_proj", "v_proj"])
+    p.add_argument("--lora_target_modules", nargs="+", default=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
     
+    p.add_argument("--load_in_4bit", action="store_true",
+                   help="Load base model with 4‑bit NF4 quantization (GPU only)")
+
     p.add_argument("--gradient_checkpointing", action="store_true", default=False)
 
     p.add_argument("--report_to", default="none")
@@ -73,7 +82,7 @@ def load_dataset_tokenize(path: str | Path, tok, max_len: int):
     tokenises with padding/truncation, adds causal‑LM labels, and drops
     any record that could not be interpreted.
     """
-    ds = load_dataset("json", data_files=str(path), split="train", streaming=True)
+    ds = load_dataset("json", data_files=str(path), split="train")
 
     def to_text(rec):
         if rec.get("text"):
@@ -112,6 +121,7 @@ def main() -> None:
         # 1. Load to CPU in fp32 to avoid MPS bf16 crash, then cast ↓
         base = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
+            attn_implementation="eager",
             device_map={"": "cpu"},
             torch_dtype=torch.float32,
             low_cpu_mem_usage=True,
@@ -119,16 +129,31 @@ def main() -> None:
         base = base.to(torch.float16)       # cast weights
         model = base.to("mps")              # move to MPS
     elif USE_CUDA:
-        base = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
-            low_cpu_mem_usage=True,
-        )
-        model = base
+        if args.load_in_4bit:
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                attn_implementation="eager",
+                device_map="auto",
+                quantization_config=bnb_cfg,
+                low_cpu_mem_usage=True,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                attn_implementation="eager",
+                device_map="auto",
+                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                low_cpu_mem_usage=True,
+            )
     else:  # pure CPU box
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
+            attn_implementation="eager",
             torch_dtype=torch.float32,
             low_cpu_mem_usage=True,
         )

@@ -6,13 +6,14 @@ The NaS Knowledge Model is a modular Retrieval-Augmented Generation (RAG) system
 
 ## Highlights
 
-- FastAPI-powered RAG API with top-k semantic retrieval and context-aware generation
-- Automated ingestion from PubMed Central using E-Utilities
-- Clean chunking and storage by year and month (`data/clean/YYYY/MM`)
+- FastAPI‑powered RAG API with top‑k semantic retrieval and context‑aware generation
+- Automated ingestion from PubMed Central **plus** arbitrary PDF drop‑box
+- Clean chunking and storage by year & month (`data/clean/YYYY/MM`)
 - Vector indexing using FAISS and SentenceTransformers
-- Monthly LoRA-based fine-tuning of TinyLlama-1.1B on Apple Silicon
-- Automated S3 uploads for all training batches and model adapters
-- Prefect‑orchestrated end‑to‑end pipeline with daily autonomous runs (agent/worker)
+- **LoRA‑based fine‑tuning of Google TxGemma‑2B (MedGemma) on Apple Silicon**
+- Ten distinct training buckets (_instructions • dialogues • cited QA • structured tables • sequences • CoT • rag_pairs • tool_calls • safety • eval_holdout_) merged automatically before each run
+- Dual‑bucket storage: `*-dataset` (LoRA corpora) and `*-pdfs` (raw RAG corpus)
+- Prefect‑orchestrated end‑to‑end pipeline with **daily** autonomous RAG‑refresh + weekly LoRA update
 
 ---
 
@@ -42,7 +43,7 @@ knowledge-model/
 ## RAG API
 
 - Accepts user questions and performs semantic retrieval from embedded biomedical chunks
-- Uses LoRA-fine-tuned TinyLlama-1.1B as the response generator
+- Uses LoRA‑fine‑tuned **TxGemma‑2B (MedGemma)** as the response generator
 - Auto-trims context for token limits, returns answer with cited sources
 - Hosted locally via FastAPI or deployable to cloud
 
@@ -54,12 +55,9 @@ All retrieval uses the newest FAISS index automatically selected by the pipeline
 
 The entire workflow is orchestrated by Prefect:
 
-1. **Fetch‑Clean‑Month** – parallel EFetch + PMC XML with intelligent back‑off,
-   tier‑ed PDF download (PMC → redirect PDF), and XML‑to‑text conversion.
-2. **Build‑FAISS** – embeds cleaned chunks with _all‑MiniLM‑L6‑v2_ and
-   writes `faiss.index` + `meta.npy`.
-3. **Eval‑Snapshot** – fixed recall@10 check; flow fails if score < 0.80.
-4. **Finetune‑LoRA** – (coming) trains TinyLlama adapters on new month.
+1. **Refresh‑Corpus** – crawls `data/corpus/raw/` for new PDFs, converts to clean text, rebuilds FAISS.
+2. **Eval‑Snapshot** – fixed recall@10 check; flow fails if score < 0.80.
+3. **Finetune‑LoRA** – trains TxGemma adapters on updated ten‑bucket corpus.
 
 A daily deployment (`pipelines/flows/continuous.py`) is scheduled at 03:00
 local time via Prefect CRON and picked up by a `prefect worker` polling the
@@ -67,7 +65,8 @@ _default_ queue.
 
 ## Model & Training Pipeline
 
-- Adapters are trained monthly on newly ingested biomedical data
+- Adapters are re‑trained weekly on the merged **ten‑bucket** corpus
+- Base model: **google/txgemma‑2b‑predict** with 4‑bit QLoRA
 - All chunked data is stored in `data/clean/YYYY/MM`
 - Train files written to `data/science_articles/YYYY-MM.jsonl`
 - LoRA adapters are saved and versioned per batch in `adapters/`
@@ -87,6 +86,7 @@ _default_ queue.
 - Prefect 2.x (orchestration)
 - BeautifulSoup4 + lxml (PDF link discovery)
 - tqdm / concurrent.futures (parallel ingestion)
+- Apple Silicon / Metal (MPS) backend for local fine‑tuning
 
 ---
 
