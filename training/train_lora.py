@@ -7,7 +7,7 @@ Example
 -------
 accelerate launch training/train_lora.py \
   --model_name_or_path google/txgemma-2b-predict \
-  --train_file data/instructions/instruction_pairs.jsonl \
+  --train_file data/lora/combined/combined.jsonl \
   --output_dir adapters/txgemma_lora_v1 \
   --num_train_epochs 2 \
   --per_device_train_batch_size 4 \
@@ -46,8 +46,12 @@ logger = logging.getLogger("train_lora")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LoRA fine‑tune for causal‑LMs")
-    p.add_argument("--model_name_or_path", default="google/medgemma-9b")
-    p.add_argument("--train_file", required=True)
+    p.add_argument("--model_name_or_path", default="google/txgemma-2b-predict")
+    p.add_argument(
+        "--train_file",
+        default="data/lora/combined/combined.jsonl",
+        help="Path to the training JSONL file (default: %(default)s)",
+    )
     p.add_argument("--output_dir", required=True)
     p.add_argument("--num_train_epochs", type=float, default=1)
     p.add_argument("--per_device_train_batch_size", type=int, default=1)
@@ -78,7 +82,7 @@ def load_dataset_tokenize(path: str | Path, tok, max_len: int):
     tokenises with padding/truncation, adds causal‑LM labels, and drops
     any record that could not be interpreted.
     """
-    ds = load_dataset("json", data_files=str(path), split="train", streaming=True)
+    ds = load_dataset("json", data_files=str(path), split="train")
 
     def to_text(rec):
         if rec.get("text"):
@@ -117,6 +121,7 @@ def main() -> None:
         # 1. Load to CPU in fp32 to avoid MPS bf16 crash, then cast ↓
         base = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
+            attn_implementation="eager",
             device_map={"": "cpu"},
             torch_dtype=torch.float32,
             low_cpu_mem_usage=True,
@@ -132,6 +137,7 @@ def main() -> None:
             )
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
+                attn_implementation="eager",
                 device_map="auto",
                 quantization_config=bnb_cfg,
                 low_cpu_mem_usage=True,
@@ -139,6 +145,7 @@ def main() -> None:
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
+                attn_implementation="eager",
                 device_map="auto",
                 torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
                 low_cpu_mem_usage=True,
@@ -146,6 +153,7 @@ def main() -> None:
     else:  # pure CPU box
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
+            attn_implementation="eager",
             torch_dtype=torch.float32,
             low_cpu_mem_usage=True,
         )
