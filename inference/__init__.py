@@ -2,7 +2,7 @@
 inference package
 =================
 
-High‑level helpers for **running the fine‑tuned TinyLlama locally**.
+High‑level helpers for **running the fine‑tuned TxGemma‑2B locally**.
 
 Sub‑modules
 -----------

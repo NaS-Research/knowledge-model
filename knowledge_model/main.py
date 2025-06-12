@@ -1,5 +1,5 @@
 """
-FastAPI entry point for local Retrieval-Augmented Generation (TinyLlama + LoRA).
+FastAPI entry point for local Retrieval-Augmented Generation (TxGemma + LoRA).
 
 POST /ask
   Body: {"text": "...", "k": 3}
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
 EMBEDDER_ID = "all-MiniLM-L6-v2"
-BASE_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+BASE_MODEL = "google/txgemma-2b-chat"
 ADAPTER_PATH = "adapters/nicole-v2"
 FAISS_PATH = "data/faiss"
 
@@ -55,7 +55,7 @@ model = PeftModel.from_pretrained(base_model, ADAPTER_PATH).eval()
 
 logger.info("Model and FAISS store loaded; ready to serve.")
 
-app = FastAPI(title="TinyLlama-RAG")
+app = FastAPI(title="TxGemma-RAG")
 
 
 class AskRequest(BaseModel):
@@ -85,17 +85,20 @@ def rag_answer(query: str, k: int = 3) -> dict:
     context = "\n\n".join(p["text"] for p in pack_context(results))
 
     prompt = (
-        f"### Context:\n{context}\n\n"
-        f"### Question:\n{query}\n\n"
-        f"### Answer:\n"
+        "<start_of_turn>system\n"
+        "You are a helpful biomedical assistant.\n<end_of_turn>\n"
+        "<start_of_turn>user\n"
+        f"Context:\n{context}\n\nQuestion:\n{query}\n"
+        "<end_of_turn>\n"
+        "<start_of_turn>model\n"
     )
 
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2000).to(model.device)
     output = model.generate(**inputs, max_new_tokens=256, eos_token_id=tokenizer.eos_token_id)[0]
     decoded = tokenizer.decode(output, skip_special_tokens=True)
 
-    if "### Answer" in decoded:
-        decoded = decoded.split("### Answer")[-1].lstrip(": ").strip()
+    if "<start_of_turn>model" in decoded:
+        decoded = decoded.split("<start_of_turn>model")[-1].strip()
 
     paragraph = decoded.split("\n\n")[0]
     answer = " ".join(paragraph.split(". ")[:5]).strip()

@@ -199,18 +199,18 @@ if __name__ == "__main__":
     parser.add_argument("question", help="User question / prompt")
     parser.add_argument(
         "--model_id",
-        default="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        help="HF model repo or local path",
+        default="google/txgemma-2b-predict",
+        help="HF model repo or local path (TxGemma‑* by default)",
     )
     parser.add_argument(
         "--adapter_dir",
-        default="adapters/tinyllama-health",
+        default="adapters/txgemma-health",
         help="Directory containing LoRA weights (optional)",
     )
     parser.add_argument("--max_tokens", type=int, default=MAX_OUTPUT_TOKENS)
     args = parser.parse_args()
 
-    logger.info("Loading base model %s with adapter %s …", args.model_id, args.adapter_dir)
+    logger.info("Loading TxGemma base model %s with adapter %s …", args.model_id, args.adapter_dir)
     model, tok = load_model(args.model_id, Path(args.adapter_dir))
 
     start = time.time()

@@ -26,11 +26,11 @@ import torch
 
 class InferenceSettings(BaseSettings):
     base_model: str = Field(
-        default="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        default="google/txgemma-2b-predict",
         description="HF model id or local path for the *base* model weights",
     )
     adapter_dir: Path = Field(
-        default=Path("adapters/tinyllama-health"),
+        default=Path("adapters/txgemma-health"),
         description="Folder that contains the LoRA adapter weights & tokenizer",
     )
 

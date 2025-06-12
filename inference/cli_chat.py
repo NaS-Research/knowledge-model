@@ -17,30 +17,37 @@ def _build_chat_prompt(
     user_msg: str,
 ) -> str:
     """
-    Compose a TinyLlama‑Chat style conversation prompt that includes the
+    Compose a **TxGemma‑Chat** style conversation prompt that includes the
     whole history plus the new user message:
 
-        <|system|> ... </s>
-        <|user|>   ... </s>
-        <|assistant|> ... </s>
+        <start_of_turn>system
         ...
-        <|user|>   NEW </s>
-        <|assistant|>
+        <end_of_turn>
+        <start_of_turn>user
+        ...
+        <end_of_turn>
+        <start_of_turn>model
+        ...
+        <end_of_turn>
+        ...
+        <start_of_turn>user
+        NEW
+        <end_of_turn>
+        <start_of_turn>model
 
-    TinyLlama‑Chat recognises the role tags, so it will continue the dialogue
-    naturally.
+    TxGemma‑Chat recognises the role tags, so it will continue the dialogue naturally.
     """
-    parts: list[str] = [f"<|system|>{system_prompt}</s>"]
+    parts: list[str] = [f"<start_of_turn>system\n{system_prompt}<end_of_turn>\n"]
     for role, text in history:
-        parts.append(f"<|{role}|>{text}</s>")
-    parts.append(f"<|user|>{user_msg.strip()}</s><|assistant|>")
+        parts.append(f"<start_of_turn>{role}\n{text}<end_of_turn>\n")
+    parts.append(f"<start_of_turn>user\n{user_msg.strip()}<end_of_turn>\n<start_of_turn>model\n")
     return "".join(parts)
 
 
 def _parse_args() -> argparse.Namespace:
     """Collect command‑line flags."""
     parser = argparse.ArgumentParser(
-        description="Chat with TinyLlama‑Health in your terminal"
+        description="Chat with TxGemma‑Health in your terminal"
     )
     # one‑shot mode
     parser.add_argument("--prompt", help="User prompt; skip REPL when supplied")
@@ -220,7 +227,7 @@ def main() -> None:
     if not adapter_dir.exists():
         sys.exit(f"[ERR] adapter dir not found: {adapter_dir}")
 
-    print(f"Loading base model + adapter on **{config.DEVICE}** …")
+    print(f"Loading TxGemma base model + adapter on **{config.DEVICE}** …")
     pipe = load_pipeline(
         adapter_dir=str(adapter_dir),
         max_new_tokens=args.max_new,

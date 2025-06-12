@@ -1,6 +1,6 @@
 
 """
-FastAPI micro‑service that exposes the fine‑tuned TinyLlama adapter locally.
+FastAPI micro‑service that exposes the fine‑tuned TxGemma adapter locally.
 
 Run:
     uvicorn inference.serve_local:app --host 0.0.0.0 --port 8000 --reload
@@ -37,11 +37,11 @@ from inference.prompt_utils import build_prompt
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-MODEL_ID: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-ADAPTER_DIR: Path = Path("adapters/tinyllama-health")
+MODEL_ID: str = "google/txgemma-2b-chat"
+ADAPTER_DIR: Path = Path("adapters/txgemma-health")
 DEVICE: str = "mps" if torch.backends.mps.is_available() else "cpu"
 
-app = FastAPI(title="TinyLlama‑Health – local inference")
+app = FastAPI(title="TxGemma‑Health – local inference")
 
 
 @lru_cache(maxsize=1)

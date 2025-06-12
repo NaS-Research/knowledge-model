@@ -16,7 +16,6 @@ python -m knowledge_model.ingestion.build_faiss \
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -24,6 +23,9 @@ from typing import Any, Dict, Iterable, List
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
+
+# use the high‑performance orjson wrapper re‑exported by the ingestion package
+from knowledge_model.ingestion import json
 
 from knowledge_model.embeddings.vector_store import LocalFaiss
 

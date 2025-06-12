@@ -31,6 +31,8 @@ from knowledge_model.ingestion.unpaywall import pdf_url_from_doi
 from knowledge_model.ingestion.download_pdf import download_pdf  # returns text or ""
 from dotenv import load_dotenv
 from tqdm.auto import tqdm
+from knowledge_model.config.settings import settings  # DATA_ROOT
+from pathlib import Path
 
 # --------------------------------------------------------------------------------------
 # Shared `requests` Session with automatic retry on dropped/chunked connections
@@ -73,6 +75,19 @@ else:
 # Max threads used for parallel EFetch/PMC full‑text.  Tune conservatively to
 # stay inside NCBI’s 10 req/s with API key (3 req/s without).
 WORKER_THREADS = 8
+
+
+# ------------------------------------------------------------------
+# Quarantine: skip permanently failing PMIDs but keep a manifest
+# ------------------------------------------------------------------
+QUAR_PATH: Path = settings.DATA_ROOT / "quarantine" / "failed_pmids.tsv"
+
+def _record_quarantine(pmid: str, reason: str) -> None:
+    """Append a failing PMID with *reason*; directory created on first use."""
+    QUAR_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # 256‑byte buffer ≈ one line; avoids thousands of fsyncs
+    with QUAR_PATH.open("a", buffering=256) as fh:
+        fh.write(f"{pmid}\t{reason}\n")
 
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
@@ -283,6 +298,21 @@ def _get_body(pmid: str, pmcid: str | None, doi: str | None) -> tuple[str, str]:
 
     return "NONE", ""
 
+# ------------------------------------------------------------------
+# Resilient wrapper: never raise into the thread pool / main loop
+# ------------------------------------------------------------------
+def _safe_get_body(pmid: str, pmcid: str | None, doi: str | None) -> tuple[str, str] | None:
+    """Return (section, text) or **None** on persistent failure."""
+    try:
+        return _get_body(pmid, pmcid, doi)
+    except requests.exceptions.RequestException as exc:
+        logger.warning("Skip PMID %s — network error: %s", pmid, exc)
+        _record_quarantine(pmid, "network")
+    except Exception as exc:  # XML parse, Unicode, etc.
+        logger.warning("Skip PMID %s — unexpected error: %s", pmid, exc)
+        _record_quarantine(pmid, "other")
+    return None
+
 
 def fetch_articles(
     query: str,
@@ -346,12 +376,15 @@ def fetch_articles(
                 )
                 doi = id_map.get("doi")
 
-                fut = pool.submit(_get_body, uid, pmcid, doi)
+                fut = pool.submit(_safe_get_body, uid, pmcid, doi)
                 futures[fut] = (uid, pmcid, doi, id_map, entry)
 
             for fut in as_completed(futures):
                 uid, pmcid, doi, id_map, entry = futures[fut]
-                section, text_body = fut.result()
+                result = fut.result()
+                if result is None:
+                    continue  # quarantined
+                section, text_body = result
                 articles.append(
                     {
                         "pmid": uid,
