@@ -1,6 +1,6 @@
 """
 Ingestion pipeline: fetch PubMed metadata, download open‑access PDFs, clean/
-chunk text, persist to DB + local files, and upload a consolidated dataset to S3.
+split into retrieval passages, persist to DB + local files, and upload a consolidated dataset to S3.
 """
 
 from __future__ import annotations
@@ -27,18 +27,23 @@ from knowledge_model.ingestion.pdf_async import fetch_pdfs_async
 from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract 
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
-from knowledge_model.processing.text_cleaner import clean_text, chunk_text
+from knowledge_model.processing.text_cleaner import clean_text
 
 logger = logging.getLogger(__name__)
 
 
 
-# ――― Centralised data location ―――
 from knowledge_model.config.settings import DATA_ROOT
 
-TRAIN_FILE = DATA_ROOT / "science_articles" / "NaS.jsonl"
-CLEAN_ROOT = DATA_ROOT / "clean"
+CORPUS_ROOT = DATA_ROOT / "corpus"
+RAW_ROOT    = CORPUS_ROOT / "raw"     # currently unused – kept for future PDF retention
+CLEAN_ROOT  = CORPUS_ROOT / "clean"
+CORPUS_ROOT.mkdir(parents=True, exist_ok=True)
+
+TRAIN_FILE = CORPUS_ROOT / "science_articles" / "NaS.jsonl"
 TRAIN_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+RAW_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def _month_query(year: str, month: str) -> str:
@@ -58,14 +63,7 @@ def _write_chunks(
     year: str,
     month: str,
 ) -> None:
-    """
-    Write every *chunk* to (a) the global training file and (b) a
-    per‑article file under data/clean/YYYY/MM/.
-
-    We open each target file **once** with a 4 MiB buffer to avoid the
-    thousands of open/close syscalls that were previously killing
-    throughput.
-    """
+    """Append cleaned chunks to the master JSONL and a per‑article file."""
     month_dir = CLEAN_ROOT / year / month
     month_dir.mkdir(parents=True, exist_ok=True)
 
@@ -90,10 +88,7 @@ def _write_chunks(
 def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
     logger.info("Fetching articles for query: %s", query)
     articles = fetch_articles(query)
-    # ------------------------------------------------------------------
-    # Pre‑fetch PDFs for all articles that have a PMCID.  We run this once
-    # so downloads happen in parallel instead of one‑by‑one inside the loop.
-    # ------------------------------------------------------------------
+    # Prefetch all PMC PDFs concurrently.
     pmcids = {
         (art.get("pmcid") or "")
         .replace("pmc-id:", "")
@@ -139,17 +134,14 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             section_label = art.get("section", "UNKNOWN")
 
             pdf_url: str | None = None
-            chunks: list[str] = []
+            passages: list[str] = []
             downloaded = False
             abstract_text = ""
 
-            # ------------------------------------------------------------------
-            # If we already received full‑text XML from EFetch (`section == "FULL"`),
-            # skip the PDF step entirely – the XML body is good enough.
-            # ------------------------------------------------------------------
+            # Skip PDF when full‑text XML is already present.
             if section_label == "FULL" and raw_text:
-                chunks = chunk_text(raw_text, chunk_size)
-                stats["chunks"] += len(chunks)
+                passages = [raw_text]
+                stats["chunks"] += 1
                 logger.debug(
                     "Skipped PDF download for %s – full text already present in XML",
                     pmid,
@@ -160,37 +152,26 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
                     pdf_path = pdf_map.get(pmcid)
                     if pdf_path and not (existing and existing.pdf_downloaded):
                         stats["pmc"] += 1
-                        try:
-                            parsed = parse_pdf(pdf_path)
-                            # abstract
-                            try:
-                                abstract_text = clean_text(_efetch_abstract(pmid))
-                            except Exception:
-                                abstract_text = ""
-
-                            cleaned = clean_text(parsed["text"])
-                            chunks = chunk_text(cleaned, chunk_size)
-
-                            if abstract_text:
-                                chunks.insert(0, abstract_text)
-
-                            pdf_url = upload_dataset_to_s3(pdf_path)
-                            os.remove(pdf_path)
-                            downloaded = True
-                            stats["pdf"] += 1
-                            stats["chunks"] += len(chunks)
-                            logger.info(
-                                "Parsed %d chunks for PMCID %s", len(chunks), pmcid
-                            )
-                        except Exception as err:
-                            logger.debug("PDF parse failed for %s: %s", pmcid, err)
+                        passages = []
+                        if pmcid:
+                            passages_dicts = parse_pdf(pdf_path)  # returns list[dict]
+                            passages = [d["text"] for d in passages_dicts]
+                            if passages:
+                                stats["chunks"] += len(passages)
+                        pdf_url = upload_dataset_to_s3(pdf_path)
+                        os.remove(pdf_path)
+                        downloaded = True
+                        stats["pdf"] += 1
+                        logger.info(
+                            "Parsed %d passages for PMCID %s", len(passages), pmcid
+                        )
                 else:
                     if not pmcid:
                         logger.debug("PMID %s has no PMC entry — skipping PDF download", pmid)
 
-            if not downloaded and raw_text:
-                chunks = chunk_text(raw_text, chunk_size)
-                stats["chunks"] += len(chunks)
+            if not passages and raw_text:
+                passages = [raw_text]  # will be split later for FAISS
+                stats["chunks"] += 1
 
             article = existing or Article(
                 pmid=pmid,
@@ -215,12 +196,12 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             if i % PROGRESS_EVERY == 0:
                 logger.info("Processed %d / %d articles so far", i, len(articles))
 
-            # Persist any chunks (PDF full‑text or abstract‑only)
-            if chunks:
-                for chunk_idx, txt in enumerate(chunks):
+            # Persist any passages (PDF full‑text or abstract‑only)
+            if passages:
+                for chunk_idx, txt in enumerate(passages):
                     db.add(ArticleChunk(article_id=article.id, chunk_index=chunk_idx, chunk_text=txt))
                 db.commit()
-                _write_chunks(pmid, article.id, title, chunks, year, month)
+                _write_chunks(pmid, article.id, title, passages, year, month)
 
 
         logger.info(
@@ -274,7 +255,23 @@ def main() -> None:
     year = args.year or f"{now.year:04d}"
     month = args.month or f"{now.month:02d}"
 
+    start_ts = datetime.now(UTC)
+    logger.info(
+        "Pipeline started for %s‑%s at %s",
+        year,
+        month,
+        start_ts.strftime("%Y‑%m‑%d %H:%M:%S %Z"),
+    )
+
     run_pipeline(_month_query(year, month))
+
+    end_ts = datetime.now(UTC)
+    elapsed = end_ts - start_ts
+    logger.info(
+        "Pipeline finished in %s (ended %s)",
+        str(elapsed).split(".")[0],
+        end_ts.strftime("%Y‑%m‑%d %H:%M:%S %Z"),
+    )
 
 
 if __name__ == "__main__":
