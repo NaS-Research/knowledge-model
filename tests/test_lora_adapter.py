@@ -19,6 +19,7 @@ BASE_MODEL   = "google/txgemma-2b-predict"
 TEST_QUESTION = (
     "List red-flag symptoms of acute myocardial infarction."
 )
+STOP_TOKEN = "<eos>"
 
 
 def _spinner(msg: str, stop_event: threading.Event) -> None:
@@ -69,7 +70,12 @@ def load_model():
 def generate_answer(model, prompt: str, max_new_tokens: int = 120) -> str:
     tok = AutoTokenizer.from_pretrained(BASE_MODEL)
     inputs = tok(prompt, return_tensors="pt").to(model.device)
-    output = model.generate(**inputs, max_new_tokens=max_new_tokens)
+    output = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        eos_token_id=tok.convert_tokens_to_ids(STOP_TOKEN),
+        pad_token_id=tok.eos_token_id,
+    )
     return tok.decode(output[0], skip_special_tokens=True)
 
 
@@ -77,8 +83,8 @@ def main() -> None:
     print("Loading model and adapter…")
     model = load_model()
 
-    prompt = f"### Instruction:\n{TEST_QUESTION}\n\n### Response:"
-    answer = generate_answer(model, prompt)
+    prompt = f"### Instruction:\n{TEST_QUESTION}\n\n### Response (one bullet per line):\n"
+    answer = generate_answer(model, prompt + STOP_TOKEN)
 
     print("\n--- Generated answer ---\n")
     print(answer)
@@ -88,8 +94,8 @@ def main() -> None:
 # PyTest-style assertion (optional)
 def test_adapter_smoke():
     model = load_model()
-    prompt = f"### Instruction:\n{TEST_QUESTION}\n\n### Response:"
-    answer = generate_answer(model, prompt, max_new_tokens=80)
+    prompt = f"### Instruction:\n{TEST_QUESTION}\n\n### Response (one bullet per line):\n"
+    answer = generate_answer(model, prompt + STOP_TOKEN, max_new_tokens=80)
     assert "chest" in answer.lower() or "pain" in answer.lower()
 
 
