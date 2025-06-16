@@ -29,6 +29,8 @@ from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
 from knowledge_model.processing.text_cleaner import clean_text
 
+from knowledge_model.ingestion.build_faiss import build_faiss_index as build_index
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ logger = logging.getLogger(__name__)
 from knowledge_model.config.settings import DATA_ROOT
 
 CORPUS_ROOT = DATA_ROOT / "corpus"
-RAW_ROOT    = CORPUS_ROOT / "raw"     # currently unused – kept for future PDF retention
+RAW_ROOT    = CORPUS_ROOT / "raw"
 CLEAN_ROOT  = CORPUS_ROOT / "clean"
 CORPUS_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -72,7 +74,7 @@ def _write_chunks(
         logger.info("Skip duplicate chunk write for %s", base)
         return
 
-    buffer_size = 4 * 1024 * 1024  # 4 MiB OS‑level buffer
+    buffer_size = 4 * 1024 * 1024
     train_path = TRAIN_FILE
     article_path = month_dir / f"{base}.jsonl"
 
@@ -80,7 +82,7 @@ def _write_chunks(
          article_path.open("ab", buffering=buffer_size) as art_fh:
         for text in chunks:
             record = {"pmid": pmid, "title": title, "text": text}
-            line: bytes = json.dumps(record) + b"\n"  # orjson -> bytes
+            line: bytes = json.dumps(record) + b"\n"
             train_fh.write(line)
             art_fh.write(line)
 
@@ -88,7 +90,6 @@ def _write_chunks(
 def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
     logger.info("Fetching articles for query: %s", query)
     articles = fetch_articles(query)
-    # Prefetch all PMC PDFs concurrently.
     pmcids = {
         (art.get("pmcid") or "")
         .replace("pmc-id:", "")
@@ -116,7 +117,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             tqdm(articles, desc="Processing", unit="article", **tqdm_kwargs), start=1
         ):
             pmid = art["pmid"]
-            # Grab PMC ID (if present) — skip download when article is not in PMC
             pmcid_raw = art.get("pmcid") or ""
             pmcid = (
                 pmcid_raw.replace("pmc-id:", "")
@@ -138,7 +138,6 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             downloaded = False
             abstract_text = ""
 
-            # Skip PDF when full‑text XML is already present.
             if section_label == "FULL" and raw_text:
                 passages = [raw_text]
                 stats["chunks"] += 1
@@ -192,11 +191,9 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             db.add(article)
             db.commit()
 
-            # periodic progress log
             if i % PROGRESS_EVERY == 0:
                 logger.info("Processed %d / %d articles so far", i, len(articles))
 
-            # Persist any passages (PDF full‑text or abstract‑only)
             if passages:
                 for chunk_idx, txt in enumerate(passages):
                     db.add(ArticleChunk(article_id=article.id, chunk_index=chunk_idx, chunk_text=txt))
@@ -212,6 +209,14 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
         if TRAIN_FILE.exists() and TRAIN_FILE.stat().st_size:
             logger.info("Uploading %s to S3…", TRAIN_FILE.name)
             logger.info("Dataset URL: %s", upload_dataset_to_s3(TRAIN_FILE))
+
+            # Re‑build / refresh the local FAISS index that the API expects.
+            build_index(
+                CLEAN_ROOT,                 # directory with cleaned JSONL chunks
+                DATA_ROOT / "faiss",        # output directory for FAISS index
+                "all-MiniLM-L6-v2",         # sentence‑transformer model
+            )
+            logger.info("FAISS index rebuilt at %s", DATA_ROOT / 'faiss' / 'faiss.idx')
         else:
             logger.warning("No dataset written; skipping upload")
 
