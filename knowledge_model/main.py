@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
 EMBEDDER_ID = "all-MiniLM-L6-v2"
-BASE_MODEL = "google/txgemma-2b-chat"
-ADAPTER_PATH = "adapters/nicole-v2"
+BASE_MODEL = "google/txgemma-2b-predict"
+ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
 FAISS_PATH = "data/faiss"
 
 embedder = SentenceTransformer(
@@ -42,14 +42,15 @@ except FileNotFoundError as exc:
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
 dtype = torch.float16 if torch.backends.mps.is_available() else torch.float32
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+
 base_model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL,
     torch_dtype=dtype,
-    device_map="cpu",
+    device_map={ "": device },
     low_cpu_mem_usage=True,
+    attn_implementation="eager",
 )
-if torch.backends.mps.is_available():
-    base_model = base_model.to("mps")
 
 model = PeftModel.from_pretrained(base_model, ADAPTER_PATH).eval()
 

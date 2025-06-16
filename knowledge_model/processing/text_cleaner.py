@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import unicodedata
+import string
 from functools import cache
 from pathlib import Path
 from typing import Any, List
@@ -43,6 +44,7 @@ except (ImportError, LookupError):
 
 logger = logging.getLogger(__name__)
 
+# --- Regexes for text cleaning
 REF_TAG_RE = re.compile(r"\[(?:[\w\s,;-]{1,20})\]")
 FIG_TAG_RE = re.compile(r"\((?:fig(?:ure)?\s?[A-Za-z0-9]+)\)", re.I)
 REF_SECTION_RE = re.compile(r"\n(?:references|bibliography)\b", re.I)
@@ -52,6 +54,13 @@ UNWANTED_SECTIONS_RE = re.compile(
     r"\n\s*(?:methods?|acknowledg(?:e)?ments?|funding|conflicts? of interest)\b",
     re.I,
 )
+# Additional regexes/constants
+HTML_TAG_RE          = re.compile(r"<[^>]+>")
+CONTROL_CHARS_RE     = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]")
+DUP_PUNCT_RE         = re.compile(r"([!?.,;:]){2,}")
+SMART_QUOTES = str.maketrans({
+    "“": '"', "”": '"', "‘": "'", "’": "'", "«": '"', "»": '"'
+})
 # Remove hyphen + *line break* that was inserted by PDF wrapping, but keep real hyphenated terms.
 HYPHEN_BREAK_RE = re.compile(r"(\w+)-\s*\n\s*(\w+)")
 WHITESPACE_RE = re.compile(r"\s+")
@@ -86,6 +95,13 @@ def truncate_unwanted_sections(text: str) -> str:
     return text[: match.start()] if match else text
 
 
+
+def _standardise_unicode(text: str) -> str:
+    """Normalise Unicode, fold to ASCII, and replace smart quotes."""
+    text = unicodedata.normalize("NFKC", text).translate(SMART_QUOTES)
+    return unidecode(text)
+
+
 def clean_text(text: str) -> str:
     """Clean scientific text by removing citations, captions, boiler‑plate headings,
     normalising unicode, and collapsing whitespace.
@@ -96,7 +112,12 @@ def clean_text(text: str) -> str:
     Returns:
         str: The cleaned text.
     """
-    text = unidecode(unicodedata.normalize("NFKC", text))
+    text = _standardise_unicode(text)
+    # strip HTML/XML artifacts and control characters
+    text = HTML_TAG_RE.sub(" ", text)
+    text = CONTROL_CHARS_RE.sub(" ", text)
+    # collapse duplicate punctuation marks (e.g., “!!!” -> “!”)
+    text = DUP_PUNCT_RE.sub(r"\1", text)
 
     text = REF_TAG_RE.sub(" ", text)
     text = AUTHOR_YEAR_RE.sub(" ", text)
@@ -158,6 +179,7 @@ def process_jsonl(src_file: str = "data/science_articles/train.jsonl", out_dir: 
     out_path.mkdir(parents=True, exist_ok=True)
 
     with Path(src_file).open("r", encoding="utf-8") as f:
+        logger.info("Parsing %s → %s", src_file, out_dir)
         for line in f:
             try:
                 rec: dict[str, Any] = json.loads(line)
@@ -184,6 +206,14 @@ def process_jsonl(src_file: str = "data/science_articles/train.jsonl", out_dir: 
                     continue
 
 
+# ------------------------------------------------------------------
+# Back‑compat alias for legacy code
+# ------------------------------------------------------------------
+def strip_boiler(text: str) -> str:  # pragma: no cover
+    """Deprecated alias kept for older ingestion scripts."""
+    return clean_text(text)
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -207,3 +237,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     process_jsonl(src_file=args.src_file, out_dir=args.out_dir)
     logger.info("Cleaned chunks written to %s", args.out_dir)
+
+
+__all__ = ["clean_text", "chunk_text", "process_jsonl", "strip_boiler"]

@@ -31,15 +31,11 @@ from knowledge_model.embeddings.vector_store import LocalFaiss
 
 __all__ = ["build_faiss_index"]
 
-# ───────────────────────────── configuration ────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# ───────────────────────────── helpers ───────────────────────────────────────
-
 
 def _stream_records(path: Path) -> Iterable[Dict[str, Any]]:
     """Yield one JSON object per line (constant-memory iterator)."""
@@ -51,9 +47,6 @@ def _stream_records(path: Path) -> Iterable[Dict[str, Any]]:
                 logger.warning("Skipping malformed JSON line")
                 continue
 
-# ---------------------------------------------------------------------
-# Stream utility that accepts *either* a single file or a directory
-# ---------------------------------------------------------------------
 def _iter_jsonl(src: Path) -> Iterable[Dict[str, Any]]:
     """
     Yield JSON objects from *src*, which may be:
@@ -92,13 +85,11 @@ def _encode_texts(
     return np.asarray(vecs, dtype=np.float32)
 
 
-# ───────────────────────────── public API ────────────────────────────────────
 def build_faiss_index(
-    jsonl: Path | str | None = None,
-    *,                       # force keywords after this
-    src_dir: Path | str | None = None,
+    src_dir: Path | str,
     outdir: Path | str,
     model_id: str = "all-MiniLM-L6-v2",
+    *,
     field: str = "text",
 ) -> None:
     """
@@ -115,20 +106,11 @@ def build_faiss_index(
     field : str, optional
         JSON key whose value is embedded (default ``"text"``).
     """
-    # ------------------------------------------------------------------
-    # Accept both the NEW name (src_dir) and the OLD name (jsonl).
-    # Fall back to jsonl for legacy callers.
-    # ------------------------------------------------------------------
-    if src_dir is None:
-        if jsonl is None:
-            raise TypeError("build_faiss_index() missing required argument: 'src_dir'")
-        src_dir = jsonl
     src_dir = Path(src_dir)
 
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # -------- load & filter --------
     logger.info("Loading %s …", src_dir)
     texts: List[str] = []
     meta: List[Dict[str, Any]] = []
@@ -145,7 +127,6 @@ def build_faiss_index(
         )
     logger.info("Loaded %d passages (kept)", len(texts))
 
-    # -------- embed + write --------
     vecs = _encode_texts(texts, model_id=model_id)
 
     store = LocalFaiss(vecs.shape[1])
@@ -160,10 +141,9 @@ def build_faiss_index(
     )
 
 
-# ───────────────────────────── main ──────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build FAISS index + meta.json")
-    parser.add_argument("--jsonl", required=True, type=Path, help="Path to JSONL corpus")
+    parser.add_argument("--src", required=True, type=Path, help="JSONL file or directory with *.jsonl files")
     parser.add_argument("--outdir", required=True, type=Path, help="Output directory")
     parser.add_argument("--model", default="all-MiniLM-L6-v2", help="Sentence-BERT model ID")
     parser.add_argument(
@@ -174,9 +154,9 @@ def main() -> None:
     args = parser.parse_args()
 
     build_faiss_index(
-        src_dir=args.jsonl,          # legacy flag, new param
-        outdir=args.outdir,
-        model_id=args.model,
+        args.src,
+        args.outdir,
+        args.model,
         field=args.field,
     )
 
