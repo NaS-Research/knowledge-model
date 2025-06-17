@@ -16,7 +16,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 DEFAULT_EMBEDDER_ID = "all-MiniLM-L6-v2"
-DEFAULT_TOP_K = 5
+DEFAULT_TOP_K = 12
 INDEX_PATH = Path("data/faiss.idx")
 META_PATH = Path("data/faiss.idx.meta")
 CLEAN_DIR = Path("data/clean")
@@ -126,21 +126,40 @@ class LocalFaiss:
         logging.info(f"Loaded FAISS index with {len(store.meta)} chunks from {idx_path}")
         return store
 
-    def search(self, vec: np.ndarray, k: int = DEFAULT_TOP_K) -> List[Dict[str, Any]]:
-        """Search the index for the top k most similar vectors.
+    def search(
+        self,
+        vec: np.ndarray,
+        *,
+        k: int = DEFAULT_TOP_K,
+        min_score: float = 0.75,
+    ) -> List[Dict[str, Any]]:
+        """Return up to *k* passages with cosine‑similarity ≥ *min_score*.
 
         Args:
-            vec (np.ndarray): Query vector.
-            k (int, optional): Number of top results to return. Defaults to DEFAULT_TOP_K.
+            vec: Single query vector (already L2‑normalised).
+            k:   Max number of results to return **after** filtering.
+                 Defaults to ``DEFAULT_TOP_K`` (12).
+            min_score: Similarity cut‑off (0–1). Anything below
+                       this threshold is ignored (default 0.75).
 
         Returns:
-            List[Dict[str, Any]]: List of metadata dicts with added 'score' key.
+            List of metadata dictionaries ordered by descending score.
         """
-        D, I = self.index.search(vec.astype("float32"), k)
-        return [
-            self.meta[i] | {"score": float(D[0][j])}
-            for j, i in enumerate(I[0])
-        ]
+        # Ask FAISS for a generous pool (2× target) to survive filtering
+        raw_k = max(k * 2, k + 4)
+        D, I = self.index.search(vec.astype("float32"), raw_k)
+
+        hits: list[dict[str, Any]] = []
+        for rank, idx in enumerate(I[0]):
+            if idx == -1:
+                continue
+            score = float(D[0][rank])  # inner‑product similarity (0‑1)
+            if score < min_score:
+                continue
+            hits.append(self.meta[idx] | {"score": score})
+            if len(hits) == k:
+                break
+        return hits
 
 
 def build_store(clean_dir: Path = CLEAN_DIR) -> None:
