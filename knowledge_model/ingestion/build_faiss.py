@@ -29,7 +29,7 @@ from knowledge_model.ingestion import json
 
 from knowledge_model.embeddings.vector_store import LocalFaiss
 
-__all__ = ["build_faiss_index"]
+__all__ = ["build_faiss_index", "build_index"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,6 +140,10 @@ def build_faiss_index(
         vecs.shape[0],
     )
 
+# Back‑compat shim – remove once all callers migrate.
+def build_index(*args, **kwargs):
+    """Deprecated alias for :func:`build_faiss_index` (kept for pipeline.py)."""
+    return build_faiss_index(*args, **kwargs)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build FAISS index + meta.json")

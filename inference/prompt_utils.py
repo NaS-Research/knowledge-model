@@ -1,4 +1,3 @@
-
 """
 Utilities for building prompts and streaming generations during local
 inference.  Designed to stay small‑footprint but extensible.
@@ -48,17 +47,16 @@ SYSTEM_MSG: str = (
     "from Nobel‑ and Lasker‑prize–winning investigators and attending "
     "physicians to PharmD/PhD trainees and undergraduates.  Respond in a "
     "professional, precise, yet approachable tone:\n"
-    "• Provide clear, well‑structured explanations that reflect deep domain "
-    "  knowledge.\n"
-    "• Paraphrase in your own words—**do not** copy text verbatim or include "
-    "  reference lists or citations.\n"
-    "• Use concise paragraphs, and bullet or numbered lists when they improve "
-    "  readability.\n"
-    "• There is no rigid length limit; focus on clarity and completeness.\n"
-    "• Begin directly with the answer—no salutations, no headers such as "
-    "  \"Answer:\".\n"
-    "• Maintain a respectful, collaborative tone suitable for peer "
-    "  discussion among scientists and clinicians."
+    "• Provide clear, well‑structured explanations that reflect deep domain knowledge.\n"
+    "• Paraphrase in your own words—**do not** copy text verbatim or cite sources.\n"
+    "• Use concise paragraphs; introduce bullet or numbered lists when they aid readability.\n"
+    "• Match the level of detail to the question: offer terse answers for simple queries and expand only when the topic is complex.\n"
+    "• Limit bullet lists to a maximum of ten non‑redundant points and trim repetition.\n"
+    "• Begin directly with the answer—avoid greetings or headings such as \"Answer:\".\n"
+    "• Maintain a respectful, collaborative tone suitable for peer discussion among scientists and clinicians.\n"
+    "• Answer **only** with information found between <context>…</context>; "
+    "if the required facts are absent, reply with “insufficient evidence”.\n"
+    "• If a statement cannot be supported exactly by the text inside <context>, reply “insufficient evidence”.\n"
 )
 
 STOP_STRINGS: List[str] = ["\n\nUser:", "\n\n###"]
@@ -75,6 +73,8 @@ def _truncate(tokens: List[int], max_len: int) -> List[int]:
 def build_prompt(
     user_msg: str,
     conversation: str | None = None,
+    *,
+    context: str | None = None,
     system_msg: str = SYSTEM_MSG,
 ) -> str:
     """
@@ -86,6 +86,8 @@ def build_prompt(
         The latest user question / instruction.
     conversation : str | None
         Running transcript of previous turns (already formatted).
+    context : str | None
+        Retrieved evidence; wrapped in <context> tags if provided.
     system_msg : str
         System‑level behaviour instruction.
 
@@ -94,10 +96,17 @@ def build_prompt(
     full_prompt : str
     """
     parts: List[str] = [f"### System:\n{system_msg.strip()}"]
+
+    if context:
+        parts.append(f"<context>\n{context.strip()}\n</context>")
+
     if conversation:
         parts.append(conversation.strip())
     parts.append(f"### User:\n{user_msg.strip()}")
-    parts.append("### Assistant:\n")
+    # Pre‑seed the first bullet so the model
+    # immediately continues the list and cannot echo
+    # any stray header text.
+    parts.append("### Assistant:\n• ")
     return "\n\n".join(parts)
 
 
