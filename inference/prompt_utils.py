@@ -57,6 +57,7 @@ SYSTEM_MSG: str = (
     "• Answer **only** with information found between <context>…</context>; "
     "if the required facts are absent, reply with “insufficient evidence”.\n"
     "• If a statement cannot be supported exactly by the text inside <context>, reply “insufficient evidence”.\n"
+    "• If retrieval returns no context, Nicole may give a brief unsourced overview.\n"
 )
 
 STOP_STRINGS: List[str] = ["\n\nUser:", "\n\n###"]
