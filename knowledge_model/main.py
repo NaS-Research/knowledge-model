@@ -25,6 +25,52 @@ from inference.model_loader import load_finetuned_model
 from knowledge_model.embeddings.vector_store import LocalFaiss
 from knowledge_model.embeddings.re_rank import rerank
 
+# ---------------------------------------------------------------------------
+# Lazy, on‑demand model initialisation
+# ---------------------------------------------------------------------------
+embedder: SentenceTransformer | None = None
+store: "LocalFaiss" | None = None  # quotes to avoid forward ref type issue
+tokenizer = None
+model = None
+
+def _lazy_init() -> None:
+    """
+    Load the embedder, FAISS store, and fine‑tuned language model the first time
+    we receive a user request.  This ensures Uvicorn binds to the port within a
+    second, so Render’s health‑check succeeds.  Subsequent calls are no‑ops.
+    """
+    global embedder, store, tokenizer, model
+
+    if embedder is not None:
+        return  # already initialised
+
+    EMBEDDER_ID = "BAAI/bge-large-en-v1.5"
+    BASE_MODEL   = "google/txgemma-2b-predict"
+    ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
+    FAISS_PATH   = "data/faiss"
+
+    device = (
+        "mps" if torch.backends.mps.is_available()
+        else "cuda" if torch.cuda.is_available()
+        else "cpu"
+    )
+    dtype  = torch.float16 if device != "cpu" else torch.float32
+
+    logger.info("Loading embedder %s on %s …", EMBEDDER_ID, device)
+    embedder = SentenceTransformer(EMBEDDER_ID, device=device)
+
+    try:
+        store = LocalFaiss.load(FAISS_PATH)
+    except FileNotFoundError:
+        logger.error("FAISS index not found at %s", FAISS_PATH)
+        raise
+
+    logger.info("Loading base model %s with LoRA from %s …", BASE_MODEL, ADAPTER_PATH)
+    tokenizer, model_ = load_finetuned_model(BASE_MODEL, ADAPTER_PATH, torch_dtype=dtype)
+    model_.to(device)
+    model = model_
+
+    logger.info("Model, embedder, and FAISS store ready.")
 
 class StopOnTokens(StoppingCriteria):
     def __init__(self, stop_strings, tokenizer):
@@ -150,33 +196,18 @@ def _postprocess_bullets(text: str, max_items: int = 10) -> str:
 
     return "\n".join(f"• {l}" for l in lines) if lines else "Insufficient evidence."
 
-EMBEDDER_ID = "BAAI/bge-large-en-v1.5"
-BASE_MODEL = "google/txgemma-2b-predict"
-ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
-FAISS_PATH = "data/faiss"
 
-embedder = SentenceTransformer(
-    EMBEDDER_ID,
-    device="mps" if torch.backends.mps.is_available() else "cpu",
-)
-
-try:
-    # Use the classmethod loader to properly initialise from disk.
-    store = LocalFaiss.load(FAISS_PATH)
-except FileNotFoundError as exc:
-    logger.error("FAISS index not found at %s", FAISS_PATH)
-    raise
-
-dtype = torch.float16 if torch.backends.mps.is_available() else torch.float32
-device = "mps" if torch.backends.mps.is_available() else "cpu"
-
-# Load fine‑tuned TxGemma‑LoRA adapter via central loader
-tokenizer, model = load_finetuned_model(BASE_MODEL, ADAPTER_PATH)
-
-logger.info("Embedder %s | top‑k=%d | score≥0.80 | model=txgemma‑LoRA", EMBEDDER_ID, 12)
+logger.info("Embedder %s | top‑k=%d | score≥0.80 | model=txgemma‑LoRA", "BAAI/bge-large-en-v1.5", 12)
 logger.info("Model and FAISS store loaded; ready to serve.")
 
 app = FastAPI(title="TxGemma-RAG")
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """
+    Lightweight liveness probe for Render.
+    """
+    return {"status": "ok"}
 
 
 class AskRequest(BaseModel):
@@ -201,6 +232,7 @@ def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
 
 
 def rag_answer(query: str, k: int = 3) -> dict:
+    _lazy_init()  # ensure models are loaded
     q_vec = embedder.encode([query], normalize_embeddings=True)
     # 1️⃣ Normal recall – retrieve 2 × k then keep hits ≥ 0.80
     raw_hits = _retrieve(query, q_vec, k, mult=2)
