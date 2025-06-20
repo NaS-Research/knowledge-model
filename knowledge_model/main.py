@@ -210,6 +210,19 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
+def root() -> dict[str, str]:
+    """
+    Friendly landing route so browser hits to '/' don't 404.
+    """
+    return {
+        "message": "Nicole RAG API – send POST /ask with {'text': '...', 'k': 3}",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 class AskRequest(BaseModel):
     text: str
     k: int = 12
@@ -218,7 +231,6 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     sources: list[dict]
-
 
 def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
     selected, used = [], 0
