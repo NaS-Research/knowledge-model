@@ -39,7 +39,6 @@ class StopOnTokens(StoppingCriteria):
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-# --- retrieval helper -------------------------------------------------------
 def _retrieve(query_text: str, query_vec: np.ndarray, k: int, mult: int) -> list[dict]:
     """
     Retrieve k × mult passages, then re‑rank with the cross‑encoder.
@@ -61,7 +60,6 @@ def _retrieve(query_text: str, query_vec: np.ndarray, k: int, mult: int) -> list
     raw = store.search(query_vec, k=k * mult)
     return rerank(query_text, raw, top_k=k * mult)
 
-# ------------------------------------------------------------------
 # Human‑sounding fallback disclaimers (italic, single sentence)
 _DISCLAIMERS = [
     "_I don't currently have information available on this specific topic._",
@@ -72,7 +70,6 @@ _DISCLAIMERS = [
     "_I don't yet have sufficient data to accurately address this question._",
     "_Right now, I lack enough information to respond to this query._",
 ]
-# ------------------------------------------------------------------
 
 def _generate_fallback(question: str) -> str:
     """

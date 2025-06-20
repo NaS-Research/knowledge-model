@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: nicole-llm
+    env: docker
+    plan: standard
+    region: ohio
+    autoDeploy: true
+    healthCheckPath: /health
+    disk:
+      name: vec-store
+      mountPath: /data
+      sizeGB: 20
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MODEL_WEIGHTS_PATH
+        value: /model/nicole
+      - key: VECTOR_DB_PATH
+        value: /data/faiss.index
