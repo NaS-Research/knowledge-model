@@ -230,9 +230,8 @@ def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
         used += n_tok
     return selected
 
-
 def rag_answer(query: str, k: int = 3) -> dict:
-    _lazy_init()  # ensure models are loaded
+    _lazy_init()
     q_vec = embedder.encode([query], normalize_embeddings=True)
     # 1️⃣ Normal recall – retrieve 2 × k then keep hits ≥ 0.80
     raw_hits = _retrieve(query, q_vec, k, mult=2)
