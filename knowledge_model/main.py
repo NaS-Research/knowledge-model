@@ -200,7 +200,27 @@ def _postprocess_bullets(text: str, max_items: int = 10) -> str:
 logger.info("Embedder %s | top‑k=%d | score≥0.80 | model=txgemma‑LoRA", "BAAI/bge-large-en-v1.5", 12)
 logger.info("Model and FAISS store loaded; ready to serve.")
 
+
 app = FastAPI(title="TxGemma-RAG")
+
+from fastapi.middleware.cors import CORSMiddleware
+
+# CORS settings: allow local dev and your production front‑end.
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # TODO: replace with your real front‑end domain when deployed
+    "https://nas-frontend.vercel.app",
+    "*",  # TEMP: wildcard while testing
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 def health() -> dict[str, str]:
