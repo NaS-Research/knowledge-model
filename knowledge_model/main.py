@@ -209,15 +209,13 @@ from fastapi.middleware.cors import CORSMiddleware
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    # TODO: replace with your real front‑end domain when deployed
-    "https://nas-frontend.vercel.app",
-    "*",  # TEMP: wildcard while testing
+    "https://nas-frontend.vercel.app",  # TODO: replace with actual prod URL
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
