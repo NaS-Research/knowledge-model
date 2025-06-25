@@ -61,12 +61,12 @@ def _lazy_init() -> None:
     if embedder is not None:
         return 
 
-    EMBEDDER_ID = "BAAI/bge-large-en-v1.5"
+    EMBEDDER_ID = "sentence-transformers/all-MiniLM-L6-v2"
     BASE_MODEL   = "google/txgemma-2b-predict"
     ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
     FAISS_PATH   = "data/faiss"
-    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")          # for FAISS index
-    ADAPTER_S3   = os.getenv("ADAPTER_S3_PREFIX")        # new: LoRA adapter
+    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")
+    ADAPTER_S3   = os.getenv("ADAPTER_S3_PREFIX")
 
     # Ensure index + metadata exist (download once per container)
     if S3_PREFIX:
