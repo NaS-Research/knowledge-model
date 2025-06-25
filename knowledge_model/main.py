@@ -65,12 +65,20 @@ def _lazy_init() -> None:
     BASE_MODEL   = "google/txgemma-2b-predict"
     ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
     FAISS_PATH   = "data/faiss"
-    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")
+    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")          # for FAISS index
+    ADAPTER_S3   = os.getenv("ADAPTER_S3_PREFIX")        # new: LoRA adapter
 
     # Ensure index + metadata exist (download once per container)
     if S3_PREFIX:
         _download_if_missing(f"{S3_PREFIX}/faiss.idx",       f"{FAISS_PATH}.idx")
         _download_if_missing(f"{S3_PREFIX}/faiss.idx.meta", f"{FAISS_PATH}.idx.meta")
+
+    # Ensure LoRA adapter files exist
+    if ADAPTER_S3:
+        _download_if_missing(f"{ADAPTER_S3}/adapter_config.json",
+                             f"{ADAPTER_PATH}/adapter_config.json")
+        _download_if_missing(f"{ADAPTER_S3}/adapter_model.safetensors",
+                             f"{ADAPTER_PATH}/adapter_model.safetensors")
 
     device = (
         "mps" if torch.backends.mps.is_available()
@@ -235,11 +243,10 @@ app.add_event_handler("startup", _preload)
 
 from fastapi.middleware.cors import CORSMiddleware
 
-# CORS settings: allow local dev and your production front‑end.
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://nas-frontend.vercel.app",  # TODO: replace with actual prod URL
+    "https://knowledge-model.onrender.com",
 ]
 
 app.add_middleware(
