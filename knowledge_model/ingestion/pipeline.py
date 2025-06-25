@@ -236,6 +236,19 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             )
             for url in uploaded:
                 logger.info("Uploaded %s", url)
+            ADAPTER_DIR = Path("adapters/txgemma_lora_instr_v1")
+            if ADAPTER_DIR.exists():
+                ADAPTER_BUCKET = os.getenv("ADAPTER_S3_BUCKET", "nas-lora")
+                ADAPTER_PREFIX = os.getenv("ADAPTER_S3_PREFIX_PATH", "txgemma_lora_instr_v1")
+                logger.info("Uploading LoRA adapter to s3://%s/%s …", ADAPTER_BUCKET, ADAPTER_PREFIX)
+                uploaded = upload_directory(
+                    ADAPTER_DIR,
+                    bucket=ADAPTER_BUCKET,
+                    prefix=ADAPTER_PREFIX,
+                    recurse=True,
+                )
+                for url in uploaded:
+                    logger.info("Uploaded %s", url)
         else:
             logger.warning("No dataset written; skipping upload")
 
