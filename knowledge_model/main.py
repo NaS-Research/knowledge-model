@@ -76,8 +76,8 @@ def _lazy_init() -> None:
 
     # Ensure index + metadata exist (download once per container)
     if S3_PREFIX:
-        _download_if_missing(f"{S3_PREFIX}/faiss.idx", f"{FAISS_PATH}.idx")
-        _download_if_missing(f"{S3_PREFIX}/passages.jsonl", f"{FAISS_PATH}.jsonl")
+        _download_if_missing(f"{S3_PREFIX}/faiss.idx",       f"{FAISS_PATH}.idx")
+        _download_if_missing(f"{S3_PREFIX}/faiss.idx.meta", f"{FAISS_PATH}.idx.meta")
 
     device = (
         "mps" if torch.backends.mps.is_available()
