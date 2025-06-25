@@ -15,7 +15,7 @@ import torch
 import random
 import os
 import pathlib
-import boto3  # runtime dep ≈100 kB; already common in Render images
+import boto3
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -28,9 +28,6 @@ from inference.model_loader import load_finetuned_model
 from knowledge_model.embeddings.vector_store import LocalFaiss
 from knowledge_model.embeddings.re_rank import rerank
 
-# ---------------------------------------------------------------------------
-# Utility: download vector index from S3 at first run
-# ---------------------------------------------------------------------------
 def _download_if_missing(s3_uri: str, local_path: str) -> None:
     """
     Copy s3://bucket/key to *local_path* unless the file already exists.
@@ -49,11 +46,8 @@ def _download_if_missing(s3_uri: str, local_path: str) -> None:
     s3 = boto3.client("s3")
     s3.download_file(bucket, key, local_path)
 
-# ---------------------------------------------------------------------------
-# Lazy, on‑demand model initialisation
-# ---------------------------------------------------------------------------
 embedder: SentenceTransformer | None = None
-store: "LocalFaiss" | None = None  # quotes to avoid forward ref type issue
+store: "LocalFaiss" | None = None
 tokenizer = None
 model = None
 
@@ -66,13 +60,13 @@ def _lazy_init() -> None:
     global embedder, store, tokenizer, model
 
     if embedder is not None:
-        return  # already initialised
+        return 
 
     EMBEDDER_ID = "BAAI/bge-large-en-v1.5"
     BASE_MODEL   = "google/txgemma-2b-predict"
     ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
-    FAISS_PATH   = "data/faiss"          # no extension
-    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")  # e.g. s3://nas-assets/faiss
+    FAISS_PATH   = "data/faiss"
+    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")
 
     # Ensure index + metadata exist (download once per container)
     if S3_PREFIX:
