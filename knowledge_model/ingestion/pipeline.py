@@ -1,6 +1,11 @@
 """
 Ingestion pipeline: fetch PubMed metadata, download open‑access PDFs, clean/
 split into retrieval passages, persist to DB + local files, and upload a consolidated dataset to S3.
+
+After building the FAISS index locally, the pipeline now uploads
+`faiss.idx` and `passages.jsonl` to an S3 bucket (default
+`nas-faiss-index/faiss`) so the FastAPI runtime can download them at
+startup.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from knowledge_model.ingestion.pdf_async import fetch_pdfs_async
 from knowledge_model.ingestion.fetch_pubmed import fetch_articles, _efetch_abstract 
 from knowledge_model.ingestion.parse_pdfs import parse_pdf
 from knowledge_model.ingestion.upload_s3 import upload_dataset_to_s3
+from knowledge_model.ingestion.upload_s3 import upload_directory
 from knowledge_model.processing.text_cleaner import clean_text
 
 from knowledge_model.ingestion.build_faiss import build_faiss_index as build_index
@@ -211,12 +217,25 @@ def run_pipeline(query: str, *, chunk_size: int = 1_000) -> None:
             logger.info("Dataset URL: %s", upload_dataset_to_s3(TRAIN_FILE))
 
             # Re‑build / refresh the local FAISS index that the API expects.
+            faiss_out = DATA_ROOT / "faiss"
             build_index(
-                CLEAN_ROOT,                 # directory with cleaned JSONL chunks
-                DATA_ROOT / "faiss",        # output directory for FAISS index
-                "all-MiniLM-L6-v2",         # sentence‑transformer model
+                CLEAN_ROOT,          # directory with cleaned JSONL chunks
+                faiss_out,           # output directory for FAISS index
+                "all-MiniLM-L6-v2",  # sentence‑transformer model
             )
-            logger.info("FAISS index rebuilt at %s", DATA_ROOT / 'faiss' / 'faiss.idx')
+            logger.info("FAISS index rebuilt at %s", faiss_out / 'faiss.idx')
+
+            # Upload faiss.idx and passages.jsonl to S3 so the API can pull them
+            FAISS_BUCKET = os.getenv("FAISS_S3_BUCKET", "nas-faiss-index")
+            FAISS_PREFIX = os.getenv("FAISS_S3_PREFIX_PATH", "faiss")
+            uploaded = upload_directory(
+                faiss_out,
+                bucket=FAISS_BUCKET,
+                prefix=FAISS_PREFIX,
+                recurse=False,
+            )
+            for url in uploaded:
+                logger.info("Uploaded %s", url)
         else:
             logger.warning("No dataset written; skipping upload")
 

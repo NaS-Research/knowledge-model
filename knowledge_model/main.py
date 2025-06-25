@@ -13,6 +13,9 @@ import re
 import numpy as np
 import torch
 import random
+import os
+import pathlib
+import boto3  # runtime dep ≈100 kB; already common in Render images
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -24,6 +27,27 @@ from inference.model_loader import load_finetuned_model
 
 from knowledge_model.embeddings.vector_store import LocalFaiss
 from knowledge_model.embeddings.re_rank import rerank
+
+# ---------------------------------------------------------------------------
+# Utility: download vector index from S3 at first run
+# ---------------------------------------------------------------------------
+def _download_if_missing(s3_uri: str, local_path: str) -> None:
+    """
+    Copy s3://bucket/key to *local_path* unless the file already exists.
+
+    Render containers have ephemeral disk, so the file is cached for the
+    lifetime of the instance (avoids repeat downloads on every request).
+    """
+    if os.path.exists(local_path):
+        return
+
+    bucket, key = s3_uri.replace("s3://", "").split("/", 1)
+    logger.info("Downloading %s → %s …", s3_uri, local_path)
+    pathlib.Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Pull using boto3 (credentials supplied via env vars)
+    s3 = boto3.client("s3")
+    s3.download_file(bucket, key, local_path)
 
 # ---------------------------------------------------------------------------
 # Lazy, on‑demand model initialisation
@@ -47,7 +71,13 @@ def _lazy_init() -> None:
     EMBEDDER_ID = "BAAI/bge-large-en-v1.5"
     BASE_MODEL   = "google/txgemma-2b-predict"
     ADAPTER_PATH = "adapters/txgemma_lora_instr_v1"
-    FAISS_PATH   = "data/faiss"
+    FAISS_PATH   = "data/faiss"          # no extension
+    S3_PREFIX    = os.getenv("FAISS_S3_PREFIX")  # e.g. s3://nas-assets/faiss
+
+    # Ensure index + metadata exist (download once per container)
+    if S3_PREFIX:
+        _download_if_missing(f"{S3_PREFIX}/faiss.idx", f"{FAISS_PATH}.idx")
+        _download_if_missing(f"{S3_PREFIX}/passages.jsonl", f"{FAISS_PATH}.jsonl")
 
     device = (
         "mps" if torch.backends.mps.is_available()
@@ -61,9 +91,9 @@ def _lazy_init() -> None:
 
     try:
         store = LocalFaiss.load(FAISS_PATH)
-    except FileNotFoundError:
-        logger.error("FAISS index not found at %s", FAISS_PATH)
-        raise
+    except FileNotFoundError as e:
+        logger.warning("%s; retrieval disabled, generation‑only mode", e)
+        store = None
 
     logger.info("Loading base model %s with LoRA from %s …", BASE_MODEL, ADAPTER_PATH)
     tokenizer, model_ = load_finetuned_model(BASE_MODEL, ADAPTER_PATH, torch_dtype=dtype)
@@ -103,6 +133,9 @@ def _retrieve(query_text: str, query_vec: np.ndarray, k: int, mult: int) -> list
     list[dict]
         Re‑ranked passage dictionaries, sorted by relevance score (highest→lowest).
     """
+    if store is None:
+        return []  # retrieval disabled
+
     raw = store.search(query_vec, k=k * mult)
     return rerank(query_text, raw, top_k=k * mult)
 
@@ -262,6 +295,8 @@ def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
 
 def rag_answer(query: str, k: int = 3) -> dict:
     _lazy_init()
+    if store is None:
+        return {"answer": _generate_fallback(query), "sources": []}
     q_vec = embedder.encode([query], normalize_embeddings=True)
     # 1️⃣ Normal recall – retrieve 2 × k then keep hits ≥ 0.80
     raw_hits = _retrieve(query, q_vec, k, mult=2)
