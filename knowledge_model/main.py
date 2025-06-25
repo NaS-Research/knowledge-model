@@ -42,7 +42,6 @@ def _download_if_missing(s3_uri: str, local_path: str) -> None:
     logger.info("Downloading %s → %s …", s3_uri, local_path)
     pathlib.Path(local_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Pull using boto3 (credentials supplied via env vars)
     s3 = boto3.client("s3")
     s3.download_file(bucket, key, local_path)
 
@@ -224,11 +223,15 @@ def _postprocess_bullets(text: str, max_items: int = 10) -> str:
     return "\n".join(f"• {l}" for l in lines) if lines else "Insufficient evidence."
 
 
-logger.info("Embedder %s | top‑k=%d | score≥0.80 | model=txgemma‑LoRA", "BAAI/bge-large-en-v1.5", 12)
-logger.info("Model and FAISS store loaded; ready to serve.")
-
-
 app = FastAPI(title="TxGemma-RAG")
+
+def _preload() -> None:
+    """Warm‑start embedder, FAISS and the LM in a background thread."""
+    import threading
+    threading.Thread(target=_lazy_init, name="prewarm", daemon=True).start()
+
+app.add_event_handler("startup", _preload)
+
 
 from fastapi.middleware.cors import CORSMiddleware
 
