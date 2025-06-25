@@ -10,8 +10,9 @@ except ImportError:          # bitsandbytes not available on this machine
     _HAS_BNB = False
 
 def load_finetuned_model(
-    base_id: str = "google/txgemma-2b-chat",
+    base_id: str | Path = "google/txgemma-2b-chat",
     adapter_dir: str | Path = "adapters/txgemma_lora_instr_v1",
+    torch_dtype: str | torch.dtype | None = None,
 ):
     """
     Return (tokenizer, LoRA‑augmented Gemma‑2B model) in a Mac‑friendly,
@@ -23,6 +24,9 @@ def load_finetuned_model(
     """
     # Disable CUDA‑style allocator warm‑up that allocates > 50 % RAM on Apple Silicon
     os.environ["TRANSFORMERS_NO_EXPERIMENTAL_CACHING_ALLOCATOR"] = "1"
+
+    # Decide dtype: caller can override; otherwise default to float16 (Metal prefers fp16)
+    dtype = torch_dtype if torch_dtype is not None else "float16"
 
     quant_cfg = None
     if _HAS_BNB and os.environ.get("CUDA_VISIBLE_DEVICES") not in (None, "", "0"):
@@ -43,7 +47,7 @@ def load_finetuned_model(
     base = AutoModelForCausalLM.from_pretrained(
         base_id,
         attn_implementation="eager",      # keep module tree compatible with LoRA
-        torch_dtype="float16",            # Metal backend prefers fp16
+        torch_dtype=dtype,
         device_map=None,                  # single‑device load; avoids off‑load index
         quantization_config=quant_cfg,
     ).eval()
