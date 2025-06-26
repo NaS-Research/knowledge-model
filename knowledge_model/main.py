@@ -10,6 +10,26 @@ from __future__ import annotations
 
 import logging
 import re
+# ------------------------------------------------------------------
+#  Simple intent detector for greetings / thanks / farewells
+# ------------------------------------------------------------------
+_GREET_RE = re.compile(
+    r"\b(hi|hello|hey|howdy|greetings|good\s+(morning|afternoon|evening))\b",
+    re.I,
+)
+_THANK_RE = re.compile(r"\b(thanks?|thank you|appreciate(?:\s+it)?)\b", re.I)
+_BYE_RE   = re.compile(r"\b(bye|goodbye|see you|later|take care)\b", re.I)
+
+def _simple_intent_reply(text: str) -> str | None:
+    """Return a canned reply for trivial small‑talk; else None."""
+    if _GREET_RE.search(text):
+        return "Hello — I’m Nicole. How can I assist you today?"
+    if _THANK_RE.search(text):
+        return "You’re very welcome!"
+    if _BYE_RE.search(text):
+        return "Good‑bye for now; come back any time."
+    return None
+
 import numpy as np
 import torch
 import random
@@ -197,6 +217,38 @@ def _generate_fallback(question: str) -> str:
 
     return disclaimer + _postprocess_bullets(answer)
 
+def _zero_context_answer(question: str) -> str:
+    """
+    Generate an answer from model parameters with *no* retrieval context.
+    Used when FAISS returns nothing.
+    """
+    prompt = (
+        "### System:\n"
+        "You are Nicole, a friendly biomedical assistant. "
+        "Answer clearly and concisely. If you truly do not know, say "
+        "'I’m not sure about that.'\n"
+        "### User:\n"
+        f"{question}\n"
+        "### Assistant:\n"
+    )
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    out = model.generate(
+        **inputs,
+        max_new_tokens=320,
+        eos_token_id=tokenizer.eos_token_id,
+    )[0]
+    return tokenizer.decode(out, skip_special_tokens=True).split("### Assistant:")[-1].strip()
+
+def _looks_unhelpful(text: str) -> bool:
+    """Heuristic to detect empty or evasive answers."""
+    lo = text.lower()
+    return (
+        len(text.split()) < 3
+        or "i’m not sure" in lo
+        or "i am not sure" in lo
+        or "insufficient evidence" in lo
+    )
+
 # Collapse model output into a de‑duplicated bullet list.
 def _postprocess_bullets(text: str, max_items: int = 10) -> str:
     """
@@ -312,6 +364,10 @@ def pack_context(passages: list[dict], max_tokens: int = 800) -> list[dict]:
 
 def rag_answer(query: str, k: int = 3) -> dict:
     _lazy_init()
+    # Quick small‑talk shortcut
+    quick = _simple_intent_reply(query)
+    if quick:
+        return {"answer": quick, "sources": []}
     if store is None:
         return {"answer": _generate_fallback(query), "sources": []}
     q_vec = embedder.encode([query], normalize_embeddings=True)
@@ -324,9 +380,12 @@ def rag_answer(query: str, k: int = 3) -> dict:
         raw_hits = _retrieve(query, q_vec, k, mult=5)
         results  = [p for p in raw_hits if p.get("score", 0) >= 0.55][:k]
 
-    # 3️⃣ If still empty ➜ generative fallback
+    # 3️⃣ If still empty ➜ try parameter‑only generation, then fallback
     if not results:
-        return {"answer": _generate_fallback(query), "sources": []}
+        answer = _zero_context_answer(query)
+        if _looks_unhelpful(answer):
+            answer = _generate_fallback(query)
+        return {"answer": answer, "sources": []}
 
     logger.debug(
         "hits≥0.80: %d | hits≥0.65: %d | returned: %d",
