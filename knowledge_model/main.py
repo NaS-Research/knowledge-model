@@ -47,6 +47,7 @@ def _download_if_missing(s3_uri: str, local_path: str) -> None:
 
 embedder: SentenceTransformer | None = None
 store: "LocalFaiss" | None = None
+USE_RERANK = True
 tokenizer = None
 model = None
 
@@ -85,6 +86,8 @@ def _lazy_init() -> None:
         else "cuda" if torch.cuda.is_available()
         else "cpu"
     )
+    global USE_RERANK
+    USE_RERANK = device != "cpu"
     dtype  = torch.float16 if device != "cpu" else torch.float32
 
     logger.info("Loading embedder %s on %s …", EMBEDDER_ID, device)
@@ -135,21 +138,24 @@ def _retrieve(query_text: str, query_vec: np.ndarray, k: int, mult: int) -> list
         Re‑ranked passage dictionaries, sorted by relevance score (highest→lowest).
     """
     if store is None:
-        return []  # retrieval disabled
-
+        return []
+    if not USE_RERANK:
+        return store.search(query_vec, k=k)
     raw = store.search(query_vec, k=k * mult)
     return rerank(query_text, raw, top_k=k * mult)
 
 # Human‑sounding fallback disclaimers (italic, single sentence)
+# These are followed by a natural transition into fallback bullet points.
 _DISCLAIMERS = [
-    "_I don't currently have information available on this specific topic._",
-    "_I'm unable to answer your exact question at this time._",
-    "_My current resources don't include details on this topic._",
-    "_I haven't been trained to answer this particular question yet._",
-    "_Information on this specific issue isn't available to me right now._",
-    "_I don't yet have sufficient data to accurately address this question._",
-    "_Right now, I lack enough information to respond to this query._",
+    "_I don't currently have information available on this specific topic, but here are some general points that may help:_",
+    "_I'm unable to answer your exact question at this time; however, here are a few related considerations:_",
+    "_My current resources don't include details on this topic. Here are some general insights instead:_",
+    "_I haven't been trained to answer this particular question yet. You may find these general points useful:_",
+    "_Information on this specific issue isn't available to me right now. Here are some related notes:_",
+    "_I don't yet have sufficient data to accurately address this question. In the meantime, consider the following:_",
+    "_Right now, I lack enough information to respond to this query. Here are a few general points to consider:_",
 ]
+_LAST_DISCLAIMER: str | None = None
 
 def _generate_fallback(question: str) -> str:
     """
@@ -158,7 +164,14 @@ def _generate_fallback(question: str) -> str:
     • Picks a random, human‑friendly disclaimer to avoid repetitive wording.
     • Enforces “bullets only” formatting (no section headers, no citations).
     """
-    disclaimer = random.choice(_DISCLAIMERS) + "\n"
+    global _LAST_DISCLAIMER
+    # pick a disclaimer different from the one used last time
+    choice = random.choice(_DISCLAIMERS)
+    if _LAST_DISCLAIMER and len(_DISCLAIMERS) > 1:
+        while choice == _LAST_DISCLAIMER:
+            choice = random.choice(_DISCLAIMERS)
+    _LAST_DISCLAIMER = choice
+    disclaimer = choice + "\n\n"
 
     prompt = (
         "### System:\n"
@@ -302,14 +315,14 @@ def rag_answer(query: str, k: int = 3) -> dict:
     if store is None:
         return {"answer": _generate_fallback(query), "sources": []}
     q_vec = embedder.encode([query], normalize_embeddings=True)
-    # 1️⃣ Normal recall – retrieve 2 × k then keep hits ≥ 0.80
-    raw_hits = _retrieve(query, q_vec, k, mult=2)
-    results  = [p for p in raw_hits if p.get("score", 0) >= 0.80][:k]
+    # 1️⃣ Normal recall – retrieve 3 × k then keep hits ≥ 0.75
+    raw_hits = _retrieve(query, q_vec, k, mult=3)
+    results  = [p for p in raw_hits if p.get("score", 0) >= 0.75][:k]
 
-    # 2️⃣ Wider‑net recall – retrieve 4 × k then keep hits ≥ 0.65
+    # 2️⃣ Wider‑net recall – retrieve 5 × k then keep hits ≥ 0.55
     if not results:
-        raw_hits = _retrieve(query, q_vec, k, mult=4)
-        results  = [p for p in raw_hits if p.get("score", 0) >= 0.65][:k]
+        raw_hits = _retrieve(query, q_vec, k, mult=5)
+        results  = [p for p in raw_hits if p.get("score", 0) >= 0.55][:k]
 
     # 3️⃣ If still empty ➜ generative fallback
     if not results:
